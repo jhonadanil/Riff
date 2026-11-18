@@ -97,6 +97,7 @@ export async function renderMixToWav(onProgress?: (p: number) => void) {
     const chans = new Map<string, Tone.Channel>();
     for (const tr of tracks) {
       const ch = new Tone.Channel({
+        channelCount: 2,
         volume: tr.volume <= 0 ? -Infinity : Tone.gainToDb(tr.volume),
         pan: tr.pan,
         mute: tr.muted,
@@ -134,7 +135,8 @@ function syncTracks(tracks: Track[]) {
   for (const t of tracks) {
     let ch = channels.get(t.id);
     if (!ch) {
-      ch = new Tone.Channel().toDestination();
+      // Tone.Channel es mono por defecto (channelCount 1): forzar estéreo
+      ch = new Tone.Channel({ channelCount: 2 }).toDestination();
       channels.set(t.id, ch);
     }
     ch.volume.value = t.volume <= 0 ? -Infinity : Tone.gainToDb(t.volume);
