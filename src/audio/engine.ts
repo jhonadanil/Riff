@@ -1,5 +1,5 @@
 import * as Tone from "tone";
-import { useProject, type Clip, type Track } from "@/store/project";
+import { useProject, type Clip, type LoopRegion, type Track } from "@/store/project";
 
 /**
  * Motor de audio provisional basado en Web Audio (Tone.js).
@@ -82,15 +82,20 @@ function syncTracks(tracks: Track[]) {
 
 // --- Players (uno por clip) -------------------------------------------------
 
-type PlayerEntry = { player: Tone.Player; trackId: string; start: number };
+type PlayerEntry = { player: Tone.Player; key: string };
 const players = new Map<string, PlayerEntry>();
 
+/** Todo lo que, si cambia, obliga a reprogramar el clip. */
+const clipKey = (c: Clip) => `${c.trackId}|${c.start}|${c.offset}|${c.duration}|${c.bufferId}`;
+
 function syncClips(clips: Clip[]) {
+  let changed = false;
   const ids = new Set(clips.map((c) => c.id));
   for (const [id, entry] of players) {
     if (!ids.has(id)) {
       entry.player.unsync().dispose();
       players.delete(id);
+      changed = true;
     }
   }
   for (const c of clips) {
@@ -98,26 +103,74 @@ function syncClips(clips: Clip[]) {
     const channel = channels.get(c.trackId);
     if (!buffer || !channel) continue;
 
+    const key = clipKey(c);
     const entry = players.get(c.id);
-    if (entry && entry.trackId === c.trackId && entry.start === c.start) continue;
+    if (entry?.key === key) continue;
 
-    // Clip nuevo o movido: (re)crear su player en la posición del transporte
+    // Clip nuevo o modificado: (re)crear su player en la posición del transporte
     entry?.player.unsync().dispose();
     const player = new Tone.Player(buffer).connect(channel);
-    player.sync().start(c.start);
-    players.set(c.id, { player, trackId: c.trackId, start: c.start });
+    player.sync().start(c.start, c.offset, c.duration);
+    players.set(c.id, { player, key });
+    changed = true;
+  }
+  // Si el transporte ya está sonando, que los cambios se oigan sin esperar al siguiente play
+  if (changed && transport().state === "started") restartAtCurrentPosition();
+}
+
+function restartAtCurrentPosition() {
+  const t = transport();
+  t.seconds = t.seconds;
+}
+
+// --- Metrónomo -------------------------------------------------------------
+
+const click = new Tone.Synth({
+  oscillator: { type: "square" },
+  envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 },
+  volume: -10,
+}).toDestination();
+let metronomeEvent: number | null = null;
+
+function setMetronome(on: boolean) {
+  if (metronomeEvent !== null) transport().clear(metronomeEvent);
+  metronomeEvent = null;
+  if (!on) return;
+  metronomeEvent = transport().scheduleRepeat((time) => {
+    // El primer tiempo de cada compás (4/4) suena más agudo
+    const beat = Math.round(transport().getTicksAtTime(time) / transport().PPQ) % 4;
+    click.triggerAttackRelease(beat === 0 ? "C6" : "G5", 0.03, time);
+  }, "4n", 0);
+}
+
+// --- Loop -------------------------------------------------------------------
+
+function setLoop(loop: LoopRegion | null, enabled: boolean) {
+  const t = transport();
+  if (loop && enabled && loop.end > loop.start) {
+    t.setLoopPoints(loop.start, loop.end);
+    t.loop = true;
+  } else {
+    t.loop = false;
   }
 }
 
 // Mantener el audio en sincronía con el store
-syncTracks(useProject.getState().tracks);
-syncClips(useProject.getState().clips);
+{
+  const s = useProject.getState();
+  syncTracks(s.tracks);
+  syncClips(s.clips);
+  transport().bpm.value = s.bpm;
+  setMetronome(s.metronome);
+  setLoop(s.loop, s.loopEnabled);
+}
 useProject.subscribe((state, prev) => {
   if (state.tracks !== prev.tracks) syncTracks(state.tracks);
   if (state.clips !== prev.clips || state.tracks !== prev.tracks) syncClips(state.clips);
   if (state.bpm !== prev.bpm) transport().bpm.value = state.bpm;
+  if (state.metronome !== prev.metronome) setMetronome(state.metronome);
+  if (state.loop !== prev.loop || state.loopEnabled !== prev.loopEnabled) setLoop(state.loop, state.loopEnabled);
 });
-transport().bpm.value = useProject.getState().bpm;
 
 // --- Transporte -------------------------------------------------------------
 

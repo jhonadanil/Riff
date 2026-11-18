@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useProject } from "@/store/project";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { gridSeconds, snapTime, useProject, type Track } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { cn } from "@/lib/utils";
-import { ClipView } from "./ClipView";
+import { ClipView, TRACK_H } from "./ClipView";
 import { importAudioFiles } from "./importAudio";
 
 const HEADER_W = 224; // ancho de la cabecera de pista (w-56)
@@ -12,7 +20,7 @@ const MIN_LENGTH_SEC = 120; // la línea de tiempo nunca es más corta que esto
 const TAIL_SEC = 30; // espacio libre tras el último clip
 
 export function TrackList() {
-  const { tracks, clips, bpm, pxPerSec, selectedTrackId, updateTrack, selectTrack, setZoom } = useProject();
+  const { tracks, clips, bpm, pxPerSec, loop, loopEnabled, selectTrack, setZoom, addTrack } = useProject();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dropTrackId, setDropTrackId] = useState<string | null>(null);
 
@@ -60,60 +68,15 @@ export function TrackList() {
             <Button size="icon-xs" variant="ghost" onClick={() => setZoom(pxPerSec * 1.5)} aria-label="Acercar">
               +
             </Button>
-            <span className="ml-auto text-[11px] text-muted-foreground">Ctrl + rueda para zoom</span>
+            <span className="ml-auto text-[11px] text-muted-foreground">Arrastra en la regla = loop</span>
           </div>
-          <Ruler
-            bpm={bpm}
-            pxPerSec={pxPerSec}
-            width={timelineW}
-            onSeek={(clientX) => engine.seek(timeAt(clientX))}
-          />
+          <Ruler bpm={bpm} pxPerSec={pxPerSec} width={timelineW} timeAt={timeAt} />
         </div>
 
         {/* Pistas */}
         {tracks.map((t) => (
-          <div key={t.id} className="flex h-20 border-b">
-            <div
-              className={cn(
-                "sticky left-0 z-10 flex shrink-0 cursor-default items-center gap-1 border-r bg-background px-3",
-                selectedTrackId === t.id && "bg-accent",
-              )}
-              style={{ width: HEADER_W }}
-              onClick={() => selectTrack(t.id)}
-            >
-              <span className="mr-1 h-10 w-1 rounded-full" style={{ background: t.color }} />
-              <span className="flex-1 truncate text-sm font-medium">{t.name}</span>
-              <Button
-                size="icon-sm"
-                variant={t.muted ? "secondary" : "ghost"}
-                className={cn(t.muted && "text-amber-500")}
-                onClick={() => updateTrack(t.id, { muted: !t.muted })}
-                aria-label="Mute"
-                aria-pressed={t.muted}
-              >
-                M
-              </Button>
-              <Button
-                size="icon-sm"
-                variant={t.soloed ? "secondary" : "ghost"}
-                className={cn(t.soloed && "text-sky-500")}
-                onClick={() => updateTrack(t.id, { soloed: !t.soloed })}
-                aria-label="Solo"
-                aria-pressed={t.soloed}
-              >
-                S
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className={cn(t.armed && "text-red-500")}
-                onClick={() => updateTrack(t.id, { armed: !t.armed })}
-                aria-label="Armar grabación"
-                aria-pressed={t.armed}
-              >
-                R
-              </Button>
-            </div>
+          <div key={t.id} className="flex border-b" style={{ height: TRACK_H }}>
+            <TrackHeader track={t} canDelete={tracks.length > 1} />
 
             <div
               className={cn(
@@ -122,6 +85,7 @@ export function TrackList() {
               )}
               onClick={(e) => {
                 selectTrack(t.id);
+                useProject.getState().selectClip(null);
                 engine.seek(timeAt(e.clientX));
               }}
               onDragOver={(e) => {
@@ -135,10 +99,10 @@ export function TrackList() {
                 e.preventDefault();
                 setDropTrackId(null);
                 selectTrack(t.id);
-                importAudioFiles(Array.from(e.dataTransfer.files), t.id, timeAt(e.clientX));
+                importAudioFiles(Array.from(e.dataTransfer.files), t.id, snapTime(timeAt(e.clientX)));
               }}
             >
-              <BarLines bpm={bpm} pxPerSec={pxPerSec} />
+              <GridLines bpm={bpm} pxPerSec={pxPerSec} />
               {clips
                 .filter((c) => c.trackId === t.id)
                 .map((c) => (
@@ -148,10 +112,27 @@ export function TrackList() {
           </div>
         ))}
 
-        {clips.length === 0 && (
-          <p className="pointer-events-none sticky left-0 px-4 py-6 text-sm text-muted-foreground" style={{ paddingLeft: HEADER_W + 16 }}>
-            Arrastra archivos de audio (WAV, MP3, FLAC…) a una pista, o usa «Importar audio».
-          </p>
+        <div className="sticky left-0 flex w-fit items-center gap-4 px-3 py-2">
+          <Button variant="ghost" size="sm" onClick={addTrack}>
+            <Plus />
+            Añadir pista
+          </Button>
+          {clips.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Arrastra archivos de audio (WAV, MP3, FLAC…) a una pista, o usa «Importar audio».
+            </p>
+          )}
+        </div>
+
+        {/* Región de loop sobre las pistas */}
+        {loop && (
+          <div
+            className={cn(
+              "pointer-events-none absolute bottom-0 z-[4] border-x",
+              loopEnabled ? "border-sky-500/60 bg-sky-500/8" : "border-muted-foreground/30 bg-muted-foreground/5",
+            )}
+            style={{ top: RULER_H, left: HEADER_W + loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
+          />
         )}
 
         <Playhead pxPerSec={pxPerSec} scrollRef={scrollRef} />
@@ -160,10 +141,105 @@ export function TrackList() {
   );
 }
 
-/** Regla con números de compás (4/4). Clic para mover el cursor. */
-function Ruler({ bpm, pxPerSec, width, onSeek }: { bpm: number; pxPerSec: number; width: number; onSeek: (clientX: number) => void }) {
-  const barSec = (60 / bpm) * 4;
-  const barPx = barSec * pxPerSec;
+function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean }) {
+  const selected = useProject((s) => s.selectedTrackId === t.id);
+  const { updateTrack, selectTrack, removeTrack } = useProject();
+  const [editing, setEditing] = useState(false);
+
+  const rename = (name: string) => {
+    setEditing(false);
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== t.name) {
+      useProject.getState().checkpoint();
+      updateTrack(t.id, { name: trimmed });
+    }
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "sticky left-0 z-10 flex shrink-0 cursor-default items-center gap-1 border-r bg-background px-3",
+            selected && "bg-accent",
+          )}
+          style={{ width: HEADER_W }}
+          onClick={() => selectTrack(t.id)}
+        >
+          <span className="mr-1 h-10 w-1 shrink-0 rounded-full" style={{ background: t.color }} />
+          {editing ? (
+            <input
+              autoFocus
+              defaultValue={t.name}
+              className="min-w-0 flex-1 rounded-sm border bg-background px-1 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
+              onBlur={(e) => rename(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") setEditing(false);
+              }}
+              aria-label="Nombre de la pista"
+            />
+          ) : (
+            <span className="flex-1 truncate text-sm font-medium" onDoubleClick={() => setEditing(true)} title="Doble clic para renombrar">
+              {t.name}
+            </span>
+          )}
+          <Button
+            size="icon-sm"
+            variant={t.muted ? "secondary" : "ghost"}
+            className={cn(t.muted && "text-amber-500")}
+            onClick={() => updateTrack(t.id, { muted: !t.muted })}
+            aria-label="Mute"
+            aria-pressed={t.muted}
+          >
+            M
+          </Button>
+          <Button
+            size="icon-sm"
+            variant={t.soloed ? "secondary" : "ghost"}
+            className={cn(t.soloed && "text-sky-500")}
+            onClick={() => updateTrack(t.id, { soloed: !t.soloed })}
+            aria-label="Solo"
+            aria-pressed={t.soloed}
+          >
+            S
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className={cn(t.armed && "text-red-500")}
+            onClick={() => updateTrack(t.id, { armed: !t.armed })}
+            aria-label="Armar grabación"
+            aria-pressed={t.armed}
+          >
+            R
+          </Button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => setTimeout(() => setEditing(true), 0)}>
+          <Pencil />
+          Renombrar
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" disabled={!canDelete} onSelect={() => removeTrack(t.id)}>
+          <Trash2 />
+          Eliminar pista
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/**
+ * Regla con números de compás (4/4).
+ * Clic = mover el cursor. Arrastrar = crear región de loop.
+ */
+function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number; width: number; timeAt: (clientX: number) => number }) {
+  const { loop, loopEnabled, setLoop } = useProject();
+  const drag = useRef<{ x: number; t: number } | null>(null);
+
+  const barPx = (60 / bpm) * 4 * pxPerSec;
   // Si los compases quedan muy juntos, numerar solo cada N
   const every = Math.max(1, 2 ** Math.ceil(Math.log2(40 / barPx)));
   const bars = Math.ceil(width / barPx);
@@ -172,8 +248,28 @@ function Ruler({ bpm, pxPerSec, width, onSeek }: { bpm: number; pxPerSec: number
     <div
       className="relative shrink-0 cursor-pointer overflow-hidden text-[11px] text-muted-foreground tabular-nums"
       style={{ width }}
-      onPointerDown={(e) => onSeek(e.clientX)}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { x: e.clientX, t: snapTime(timeAt(e.clientX)) };
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d || Math.abs(e.clientX - d.x) < 4) return;
+        const t = snapTime(timeAt(e.clientX));
+        if (t !== d.t) setLoop({ start: Math.min(d.t, t), end: Math.max(d.t, t) });
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current;
+        drag.current = null;
+        if (d && Math.abs(e.clientX - d.x) < 4) engine.seek(timeAt(e.clientX));
+      }}
     >
+      {loop && (
+        <div
+          className={cn("absolute inset-y-0", loopEnabled ? "bg-sky-500/30" : "bg-muted-foreground/15")}
+          style={{ left: loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
+        />
+      )}
       {Array.from({ length: Math.ceil(bars / every) }, (_, i) => {
         const bar = i * every;
         return (
@@ -186,19 +282,18 @@ function Ruler({ bpm, pxPerSec, width, onSeek }: { bpm: number; pxPerSec: number
   );
 }
 
-/** Líneas verticales de compás en el fondo de cada pista. */
-function BarLines({ bpm, pxPerSec }: { bpm: number; pxPerSec: number }) {
+/** Líneas de compás (y de tiempo si hay zoom suficiente) en el fondo de cada pista. */
+function GridLines({ bpm, pxPerSec }: { bpm: number; pxPerSec: number }) {
   const barPx = (60 / bpm) * 4 * pxPerSec;
   const every = Math.max(1, 2 ** Math.ceil(Math.log2(40 / barPx)));
-  const step = barPx * every;
-  return (
-    <div
-      className="pointer-events-none absolute inset-0"
-      style={{
-        backgroundImage: `repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${step}px)`,
-      }}
-    />
-  );
+  const beatPx = gridSeconds(bpm, pxPerSec) * pxPerSec;
+  const layers = [`repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${barPx * every}px)`];
+  if (beatPx < barPx) {
+    layers.push(
+      `repeating-linear-gradient(to right, color-mix(in oklch, var(--border) 45%, transparent) 0 1px, transparent 1px ${beatPx}px)`,
+    );
+  }
+  return <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: layers.join(",") }} />;
 }
 
 /** Cursor de reproducción: se actualiza cada frame sin re-renderizar React. */
@@ -210,9 +305,13 @@ function Playhead({ pxPerSec, scrollRef }: { pxPerSec: number; scrollRef: React.
     let raf = 0;
     const tick = () => {
       const x = engine.position() * pxPerSec;
-      if (ref.current) ref.current.style.transform = `translateX(${x}px)`;
-      // Seguir el cursor al reproducir si se sale de la vista
       const el = scrollRef.current;
+      if (ref.current) {
+        ref.current.style.transform = `translateX(${x}px)`;
+        // Oculto si queda detrás de las cabeceras de pista
+        ref.current.style.visibility = el && x < el.scrollLeft ? "hidden" : "visible";
+      }
+      // Seguir el cursor al reproducir si se sale de la vista
       if (el && isPlaying) {
         const visibleW = el.clientWidth - HEADER_W;
         if (x < el.scrollLeft || x > el.scrollLeft + visibleW - 40) el.scrollLeft = x - 40;
@@ -226,7 +325,7 @@ function Playhead({ pxPerSec, scrollRef }: { pxPerSec: number; scrollRef: React.
   return (
     <div
       ref={ref}
-      className="pointer-events-none absolute top-0 bottom-0 z-[5] w-px bg-red-500"
+      className="pointer-events-none absolute top-0 bottom-0 z-[25] w-px bg-red-500"
       style={{ left: HEADER_W }}
     />
   );

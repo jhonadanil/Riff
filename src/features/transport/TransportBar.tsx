@@ -1,33 +1,29 @@
-import { useEffect, useRef } from "react";
-import { Circle, FileAudio, Pause, Play, SkipBack } from "lucide-react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Circle, FileAudio, Magnet, Pause, Play, Redo2, Repeat, SkipBack, Timer, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useProject } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { importAudioFiles } from "@/features/tracks/importAudio";
+import { togglePlay } from "@/features/shortcuts";
 import { cn } from "@/lib/utils";
 
+/** Envuelve un control con un tooltip que muestra su nombre y atajo. */
+function Tip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function TransportBar() {
-  const { bpm, isPlaying, isRecording, setBpm, setPlaying, toggleRecording } = useProject();
+  const s = useProject();
   const fileInput = useRef<HTMLInputElement>(null);
-
-  const togglePlay = async () => {
-    if (isPlaying) engine.pause();
-    else await engine.play();
-    setPlaying(!isPlaying);
-  };
-
-  // Barra espaciadora = reproducir / pausar (salvo escribiendo en un campo)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || (e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
-      e.preventDefault();
-      document.getElementById("transport-play")?.click();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const onImport = (files: FileList | null) => {
     if (!files?.length) return;
@@ -37,35 +33,45 @@ export function TransportBar() {
   };
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b px-4">
-      <span className="text-lg font-semibold tracking-tight">Riff</span>
+    <header className="flex h-14 items-center gap-3 border-b px-4">
+      <span className="mr-1 text-lg font-semibold tracking-tight">Riff</span>
 
       <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => engine.seek(0)} aria-label="Volver al inicio">
-              <SkipBack />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Volver al inicio</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              id="transport-play"
-              variant={isPlaying ? "secondary" : "ghost"}
-              size="icon"
-              onClick={togglePlay}
-              aria-label={isPlaying ? "Pausar" : "Reproducir"}
-            >
-              {isPlaying ? <Pause /> : <Play />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{isPlaying ? "Pausar" : "Reproducir"} (Espacio)</TooltipContent>
-        </Tooltip>
-        <Button variant="ghost" size="icon" onClick={toggleRecording} aria-label="Grabar">
-          <Circle className={cn(isRecording && "fill-red-500 text-red-500")} />
-        </Button>
+        <Tip label="Deshacer (Ctrl+Z)">
+          <Button variant="ghost" size="icon-sm" onClick={s.undo} disabled={!s.past.length} aria-label="Deshacer">
+            <Undo2 />
+          </Button>
+        </Tip>
+        <Tip label="Rehacer (Ctrl+Y)">
+          <Button variant="ghost" size="icon-sm" onClick={s.redo} disabled={!s.future.length} aria-label="Rehacer">
+            <Redo2 />
+          </Button>
+        </Tip>
+      </div>
+
+      <Separator orientation="vertical" className="h-6!" />
+
+      <div className="flex items-center gap-1">
+        <Tip label="Volver al inicio (Inicio)">
+          <Button variant="ghost" size="icon" onClick={() => engine.seek(0)} aria-label="Volver al inicio">
+            <SkipBack />
+          </Button>
+        </Tip>
+        <Tip label={`${s.isPlaying ? "Pausar" : "Reproducir"} (Espacio)`}>
+          <Button
+            variant={s.isPlaying ? "secondary" : "ghost"}
+            size="icon"
+            onClick={togglePlay}
+            aria-label={s.isPlaying ? "Pausar" : "Reproducir"}
+          >
+            {s.isPlaying ? <Pause /> : <Play />}
+          </Button>
+        </Tip>
+        <Tip label="Grabar (próximamente)">
+          <Button variant="ghost" size="icon" onClick={s.toggleRecording} aria-label="Grabar">
+            <Circle className={cn(s.isRecording && "fill-red-500 text-red-500")} />
+          </Button>
+        </Tip>
       </div>
 
       <TimeDisplay />
@@ -75,15 +81,36 @@ export function TransportBar() {
         <Input
           type="number"
           className="h-8 w-20 tabular-nums"
-          value={bpm}
+          defaultValue={s.bpm}
+          key={s.bpm}
           min={20}
           max={300}
-          onChange={(e) => {
+          onBlur={(e) => {
             const v = Number(e.target.value);
-            if (v >= 20 && v <= 300) setBpm(v);
+            if (v >= 20 && v <= 300) s.setBpm(v);
+            else e.target.value = String(s.bpm);
           }}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       </label>
+
+      <div className="flex items-center gap-1">
+        <Tip label="Metrónomo (M)">
+          <Toggle size="sm" pressed={s.metronome} onPressedChange={s.toggleMetronome} aria-label="Metrónomo">
+            <Timer />
+          </Toggle>
+        </Tip>
+        <Tip label={s.loop ? "Loop (L)" : "Loop (L) · arrastra en la regla para crear la región"}>
+          <Toggle size="sm" pressed={s.loopEnabled} onPressedChange={s.toggleLoop} disabled={!s.loop} aria-label="Loop">
+            <Repeat />
+          </Toggle>
+        </Tip>
+        <Tip label="Ajustar a la rejilla (G)">
+          <Toggle size="sm" pressed={s.snap} onPressedChange={s.toggleSnap} aria-label="Ajustar a la rejilla">
+            <Magnet />
+          </Toggle>
+        </Tip>
+      </div>
 
       <div className="ml-auto">
         <input
@@ -106,7 +133,7 @@ export function TransportBar() {
   );
 }
 
-/** Posición actual (min:seg.ms y compás.tiempo), actualizada cada frame. */
+/** Posición actual (min:seg y compás.tiempo), actualizada cada frame. */
 function TimeDisplay() {
   const ref = useRef<HTMLSpanElement>(null);
   const bpm = useProject((s) => s.bpm);

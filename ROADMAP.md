@@ -11,15 +11,17 @@ Marca `[x]` = hecho. El orden es el orden de trabajo recomendado.
 - [x] Reproducir / pausar / volver al inicio, cursor y regla de compases
 - [x] Zoom horizontal (botones y Ctrl + rueda)
 - [x] Mixer conectado al audio: volumen, pan, mute, solo
-- [ ] Ajuste a la rejilla (snap a tiempo/compás), activable
-- [ ] Mover clips entre pistas
-- [ ] Seleccionar clip; borrar con Supr
-- [ ] Recortar bordes de un clip (trim)
-- [ ] Dividir clip en el cursor (tecla S)
-- [ ] Deshacer / rehacer (Ctrl+Z / Ctrl+Y)
-- [ ] Añadir, renombrar y eliminar pistas
-- [ ] Metrónomo
-- [ ] Región de loop
+- [x] Ajuste a la rejilla (snap a tiempo/compás), activable
+- [x] Mover clips entre pistas
+- [x] Seleccionar clip; borrar con Supr
+- [x] Recortar bordes de un clip (trim)
+- [x] Dividir clip en el cursor (tecla S)
+- [x] Deshacer / rehacer (Ctrl+Z / Ctrl+Y)
+- [x] Añadir, renombrar y eliminar pistas
+- [x] Metrónomo
+- [x] Región de loop
+
+- [x] Atajos de teclado (Espacio, Inicio, S, Supr, Ctrl+Z/Y, M, L, G)
 
 ## Fase 2 · Proyecto
 - [ ] Guardar / abrir proyecto (`.riff` + carpeta de audio) con diálogos nativos de Tauri
