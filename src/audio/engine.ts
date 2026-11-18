@@ -219,6 +219,28 @@ function setLoop(loop: LoopRegion | null, enabled: boolean) {
   }
 }
 
+// --- Fin de la canción -------------------------------------------------------
+
+/** Si no hay clips, la reproducción se para al final de la línea de tiempo vacía. */
+export const EMPTY_SONG_SEC = 120;
+let endEvent: number | null = null;
+
+/** Dónde termina la canción: el final del último clip. */
+export function songEnd(clips: Clip[] = useProject.getState().clips) {
+  const last = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  return last > 0 ? last : EMPTY_SONG_SEC;
+}
+
+/** Programa la parada automática al llegar al final de la canción. */
+function scheduleEnd(clips: Clip[]) {
+  if (endEvent !== null) transport().clear(endEvent);
+  endEvent = transport().schedule((time) => {
+    // Con loop activo dentro de la canción nunca se llega aquí
+    transport().pause(time);
+    Tone.getDraw().schedule(() => useProject.getState().setPlaying(false), time);
+  }, songEnd(clips));
+}
+
 // Mantener el audio en sincronía con el store
 {
   const s = useProject.getState();
@@ -227,10 +249,12 @@ function setLoop(loop: LoopRegion | null, enabled: boolean) {
   transport().bpm.value = s.bpm;
   setMetronome(s.metronome);
   setLoop(s.loop, s.loopEnabled);
+  scheduleEnd(s.clips);
 }
 useProject.subscribe((state, prev) => {
   if (state.tracks !== prev.tracks) syncTracks(state.tracks);
   if (state.clips !== prev.clips || state.tracks !== prev.tracks) syncClips(state.clips);
+  if (state.clips !== prev.clips) scheduleEnd(state.clips);
   if (state.bpm !== prev.bpm) transport().bpm.value = state.bpm;
   if (state.metronome !== prev.metronome) setMetronome(state.metronome);
   if (state.loop !== prev.loop || state.loopEnabled !== prev.loopEnabled) setLoop(state.loop, state.loopEnabled);
@@ -249,6 +273,8 @@ export async function ensureAudioStarted() {
 
 export async function play() {
   await ensureAudioStarted();
+  // Si el cursor está al final (o más allá), volver a empezar desde el principio
+  if (transport().seconds >= songEnd() - 0.05) seek(0);
   transport().start();
 }
 

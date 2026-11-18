@@ -16,7 +16,7 @@ import { importAudioFiles } from "./importAudio";
 
 const HEADER_W = 224; // ancho de la cabecera de pista (w-56)
 const RULER_H = 28;
-const MIN_LENGTH_SEC = 120; // la línea de tiempo nunca es más corta que esto
+const MIN_LENGTH_SEC = engine.EMPTY_SONG_SEC; // la línea de tiempo nunca es más corta que esto
 const TAIL_SEC = 30; // espacio libre tras el último clip
 
 export function TrackList() {
@@ -55,7 +55,8 @@ export function TrackList() {
 
   return (
     <div ref={scrollRef} className="relative h-full overflow-auto" aria-label="Línea de tiempo">
-      <div className="relative min-w-full" style={{ width: HEADER_W + timelineW }}>
+      {/* overflow-clip: nada (cursor, clips arrastrados) puede agrandar el área de scroll */}
+      <div className="relative min-w-full overflow-clip" style={{ width: HEADER_W + timelineW }}>
         {/* Regla */}
         <div className="sticky top-0 z-20 flex border-b bg-background" style={{ height: RULER_H }}>
           <div
