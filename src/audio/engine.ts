@@ -1,10 +1,126 @@
 import * as Tone from "tone";
+import { useProject, type Clip, type Track } from "@/store/project";
 
 /**
  * Motor de audio provisional basado en Web Audio (Tone.js).
  * Sirve para prototipar la UI. Más adelante el audio en tiempo real
  * (entrada de guitarra, amplis, VST3/CLAP) vivirá en el backend Rust de Tauri.
+ *
+ * El estado (pistas, clips) vive en el store de Zustand; este módulo lo observa
+ * y mantiene sincronizados los nodos de audio: un Tone.Channel por pista y un
+ * Tone.Player (sincronizado con el transporte) por clip.
  */
+
+const transport = () => Tone.getTransport();
+
+// --- Buffers de audio (no van al store: no son serializables) ---------------
+
+const buffers = new Map<string, Tone.ToneAudioBuffer>();
+const peaksCache = new Map<string, Float32Array>();
+
+/** Puntos de forma de onda por segundo que se guardan para dibujar. */
+const PEAKS_PER_SECOND = 200;
+
+function computePeaks(buffer: AudioBuffer): Float32Array {
+  const points = Math.max(1, Math.ceil(buffer.duration * PEAKS_PER_SECOND));
+  const bucket = Math.max(1, Math.floor(buffer.length / points));
+  const peaks = new Float32Array(points);
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+  for (let p = 0; p < points; p++) {
+    let max = 0;
+    const from = p * bucket;
+    const to = Math.min(from + bucket, buffer.length);
+    for (const data of channels) {
+      for (let i = from; i < to; i++) {
+        const v = Math.abs(data[i]);
+        if (v > max) max = v;
+      }
+    }
+    peaks[p] = max;
+  }
+  return peaks;
+}
+
+export function getPeaks(bufferId: string) {
+  return peaksCache.get(bufferId);
+}
+
+/** Decodifica un archivo de audio y lo deja listo para usar en clips. */
+export async function decodeFile(file: File) {
+  const data = await file.arrayBuffer();
+  const audio = await Tone.getContext().decodeAudioData(data);
+  const id = crypto.randomUUID();
+  buffers.set(id, new Tone.ToneAudioBuffer(audio));
+  peaksCache.set(id, computePeaks(audio));
+  return { bufferId: id, duration: audio.duration };
+}
+
+// --- Canales (uno por pista) ------------------------------------------------
+
+const channels = new Map<string, Tone.Channel>();
+
+function syncTracks(tracks: Track[]) {
+  const ids = new Set(tracks.map((t) => t.id));
+  for (const [id, ch] of channels) {
+    if (!ids.has(id)) {
+      ch.dispose();
+      channels.delete(id);
+    }
+  }
+  for (const t of tracks) {
+    let ch = channels.get(t.id);
+    if (!ch) {
+      ch = new Tone.Channel().toDestination();
+      channels.set(t.id, ch);
+    }
+    ch.volume.value = t.volume <= 0 ? -Infinity : Tone.gainToDb(t.volume);
+    ch.pan.value = t.pan;
+    ch.mute = t.muted;
+    ch.solo = t.soloed;
+  }
+}
+
+// --- Players (uno por clip) -------------------------------------------------
+
+type PlayerEntry = { player: Tone.Player; trackId: string; start: number };
+const players = new Map<string, PlayerEntry>();
+
+function syncClips(clips: Clip[]) {
+  const ids = new Set(clips.map((c) => c.id));
+  for (const [id, entry] of players) {
+    if (!ids.has(id)) {
+      entry.player.unsync().dispose();
+      players.delete(id);
+    }
+  }
+  for (const c of clips) {
+    const buffer = buffers.get(c.bufferId);
+    const channel = channels.get(c.trackId);
+    if (!buffer || !channel) continue;
+
+    const entry = players.get(c.id);
+    if (entry && entry.trackId === c.trackId && entry.start === c.start) continue;
+
+    // Clip nuevo o movido: (re)crear su player en la posición del transporte
+    entry?.player.unsync().dispose();
+    const player = new Tone.Player(buffer).connect(channel);
+    player.sync().start(c.start);
+    players.set(c.id, { player, trackId: c.trackId, start: c.start });
+  }
+}
+
+// Mantener el audio en sincronía con el store
+syncTracks(useProject.getState().tracks);
+syncClips(useProject.getState().clips);
+useProject.subscribe((state, prev) => {
+  if (state.tracks !== prev.tracks) syncTracks(state.tracks);
+  if (state.clips !== prev.clips || state.tracks !== prev.tracks) syncClips(state.clips);
+  if (state.bpm !== prev.bpm) transport().bpm.value = state.bpm;
+});
+transport().bpm.value = useProject.getState().bpm;
+
+// --- Transporte -------------------------------------------------------------
+
 let started = false;
 
 export async function ensureAudioStarted() {
@@ -14,16 +130,22 @@ export async function ensureAudioStarted() {
   }
 }
 
-export async function play(bpm: number) {
+export async function play() {
   await ensureAudioStarted();
-  Tone.getTransport().bpm.value = bpm;
-  Tone.getTransport().start();
+  transport().start();
 }
 
-export function stop() {
-  Tone.getTransport().stop();
+/** Pausa: la posición se mantiene donde está. */
+export function pause() {
+  transport().pause();
 }
 
-export function setBpm(bpm: number) {
-  Tone.getTransport().bpm.value = bpm;
+/** Mueve el cursor de reproducción (en segundos). */
+export function seek(seconds: number) {
+  transport().seconds = Math.max(0, seconds);
+}
+
+/** Posición actual del transporte en segundos. */
+export function position() {
+  return transport().seconds;
 }
