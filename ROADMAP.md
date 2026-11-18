@@ -1,0 +1,51 @@
+# Riff · Lista de tareas
+
+Marca `[x]` = hecho. El orden es el orden de trabajo recomendado.
+
+## Fase 0 · Base
+- [x] Scaffold Tauri 2 + React + Tailwind + shadcn + Zustand + Tone.js
+- [x] Repo en GitHub (jhonadanil/Riff)
+
+## Fase 1 · Edición básica (motor Tone.js)
+- [x] Importar audio (arrastrar o botón) como clips con forma de onda
+- [x] Reproducir / pausar / volver al inicio, cursor y regla de compases
+- [x] Zoom horizontal (botones y Ctrl + rueda)
+- [x] Mixer conectado al audio: volumen, pan, mute, solo
+- [ ] Ajuste a la rejilla (snap a tiempo/compás), activable
+- [ ] Mover clips entre pistas
+- [ ] Seleccionar clip; borrar con Supr
+- [ ] Recortar bordes de un clip (trim)
+- [ ] Dividir clip en el cursor (tecla S)
+- [ ] Deshacer / rehacer (Ctrl+Z / Ctrl+Y)
+- [ ] Añadir, renombrar y eliminar pistas
+- [ ] Metrónomo
+- [ ] Región de loop
+
+## Fase 2 · Proyecto
+- [ ] Guardar / abrir proyecto (`.riff` + carpeta de audio) con diálogos nativos de Tauri
+- [ ] Exportar la mezcla a WAV
+- [ ] Proyectos recientes y autoguardado
+
+## Fase 3 · Grabación
+- [ ] Elegir entrada de audio (interfaz / micro) y monitorizar
+- [ ] Grabar en las pistas armadas, con cuenta previa
+- [ ] Compensación de latencia
+
+## Fase 4 · Rock: amplis, pedales y batería
+- [ ] Cadena de efectos por pista (insertar, reordenar, bypass)
+- [ ] Pedales: overdrive, distorsión, fuzz, delay, chorus, reverb, noise gate
+- [ ] Ampli: previo + EQ + simulación de pantalla (respuestas impulso / IR)
+- [ ] Afinador
+- [ ] Batería: sampler con kits gratis + secuenciador por pasos y patrones
+
+## Fase 5 · Motor nativo (Rust)
+- [ ] Motor de audio en Rust (cpal; ASIO en Windows) con baja latencia
+- [ ] Puente UI ↔ motor mediante comandos/eventos de Tauri
+- [ ] Hosting de plugins VST3 / CLAP
+
+## Fase 6 · IA
+- [ ] Ideas a definir: generar baterías, sugerir tonos de ampli, separar pistas, mezcla asistida
+
+## Fase 7 · Distribución
+- [ ] Instalador para Windows, auto-actualización
+- [ ] CI en GitHub Actions (build + checks)
