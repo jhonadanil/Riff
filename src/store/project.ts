@@ -63,6 +63,14 @@ type ProjectState = {
   loopEnabled: boolean;
   past: Snapshot[];
   future: Snapshot[];
+  /** Ruta del archivo .riff abierto (null = proyecto sin guardar). */
+  projectPath: string | null;
+  /** Hay cambios sin guardar. */
+  dirty: boolean;
+
+  /** Sustituye el proyecto entero (nuevo o abierto desde disco). */
+  loadProject: (data: ProjectData, path: string | null) => void;
+  markSaved: (path: string) => void;
 
   setBpm: (bpm: number) => void;
   setPlaying: (v: boolean) => void;
@@ -91,6 +99,15 @@ type ProjectState = {
   splitAt: (time: number) => void;
 };
 
+/** Lo que se guarda en el archivo .riff. */
+export type ProjectData = {
+  bpm: number;
+  tracks: Track[];
+  clips: Clip[];
+  loop: LoopRegion | null;
+  loopEnabled: boolean;
+};
+
 const track = (id: string, name: string, color: string, pan = 0): Track => ({
   id,
   name,
@@ -102,27 +119,56 @@ const track = (id: string, name: string, color: string, pan = 0): Track => ({
   armed: false,
 });
 
+/** Plantilla de proyecto nuevo: las pistas típicas de una banda de rock. */
+export function emptyProject(): ProjectData {
+  return {
+    bpm: 120,
+    tracks: [
+      track(crypto.randomUUID(), "Guitarra L", TRACK_COLORS[0], -0.6),
+      track(crypto.randomUUID(), "Guitarra R", TRACK_COLORS[1], 0.6),
+      track(crypto.randomUUID(), "Bajo", TRACK_COLORS[2]),
+      track(crypto.randomUUID(), "Batería", TRACK_COLORS[3]),
+      track(crypto.randomUUID(), "Voz", TRACK_COLORS[4]),
+    ],
+    clips: [],
+    loop: null,
+    loopEnabled: false,
+  };
+}
+
+const initial = emptyProject();
+let suppressDirty = false;
+
 export const useProject = create<ProjectState>((set, get) => ({
-  bpm: 120,
+  ...initial,
   isPlaying: false,
   isRecording: false,
-  tracks: [
-    track("gtr-l", "Guitarra L", TRACK_COLORS[0], -0.6),
-    track("gtr-r", "Guitarra R", TRACK_COLORS[1], 0.6),
-    track("bass", "Bajo", TRACK_COLORS[2]),
-    track("drums", "Batería", TRACK_COLORS[3]),
-    track("vox", "Voz", TRACK_COLORS[4]),
-  ],
-  clips: [],
-  selectedTrackId: "gtr-l",
+  selectedTrackId: initial.tracks[0].id,
   selectedClipId: null,
   pxPerSec: 50,
   snap: true,
   metronome: false,
-  loop: null,
-  loopEnabled: false,
   past: [],
   future: [],
+  projectPath: null,
+  dirty: false,
+
+  loadProject: (data, projectPath) => {
+    suppressDirty = true;
+    set({
+      ...data,
+      projectPath,
+      dirty: false,
+      past: [],
+      future: [],
+      selectedClipId: null,
+      selectedTrackId: data.tracks[0]?.id ?? null,
+      isPlaying: false,
+      isRecording: false,
+    });
+    suppressDirty = false;
+  },
+  markSaved: (projectPath) => set({ projectPath, dirty: false }),
 
   setBpm: (bpm) => set({ bpm }),
   setPlaying: (isPlaying) => set({ isPlaying }),
@@ -230,3 +276,17 @@ export function snapTime(t: number) {
   const g = gridSeconds(bpm, pxPerSec);
   return Math.round(t / g) * g;
 }
+
+// Cualquier cambio en lo que se guarda marca el proyecto como modificado
+useProject.subscribe((s, prev) => {
+  if (s.dirty || suppressDirty) return;
+  if (
+    s.tracks !== prev.tracks ||
+    s.clips !== prev.clips ||
+    s.bpm !== prev.bpm ||
+    s.loop !== prev.loop ||
+    s.loopEnabled !== prev.loopEnabled
+  ) {
+    useProject.setState({ dirty: true });
+  }
+});

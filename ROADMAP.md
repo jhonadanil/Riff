@@ -20,13 +20,13 @@ Marca `[x]` = hecho. El orden es el orden de trabajo recomendado.
 - [x] Añadir, renombrar y eliminar pistas
 - [x] Metrónomo
 - [x] Región de loop
-
 - [x] Atajos de teclado (Espacio, Inicio, S, Supr, Ctrl+Z/Y, M, L, G)
 
 ## Fase 2 · Proyecto
-- [ ] Guardar / abrir proyecto (`.riff` + carpeta de audio) con diálogos nativos de Tauri
-- [ ] Exportar la mezcla a WAV
-- [ ] Proyectos recientes y autoguardado
+- [x] Guardar / abrir proyecto (`.riff` + carpeta `Audio/`) con diálogos nativos de Tauri
+- [x] Exportar la mezcla a WAV (24 bits)
+- [x] Proyectos recientes y autoguardado (cada 2 min si ya tiene archivo)
+- [x] Aviso de cambios sin guardar al cerrar, abrir o crear proyecto
 
 ## Fase 3 · Grabación
 - [ ] Elegir entrada de audio (interfaz / micro) y monitorizar

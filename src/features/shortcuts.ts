@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useProject } from "@/store/project";
 import * as engine from "@/audio/engine";
+import { exportWav, newProject, openProject, saveProject, saveProjectAs } from "@/project/projectFile";
 
 export async function togglePlay() {
   const { isPlaying, setPlaying } = useProject.getState();
@@ -13,6 +14,7 @@ export async function togglePlay() {
  * Atajos de teclado globales:
  * Espacio play/pausa · Inicio volver al inicio · S dividir · Supr borrar clip
  * Ctrl+Z deshacer · Ctrl+Y / Ctrl+Shift+Z rehacer · M metrónomo · L loop · G rejilla
+ * Ctrl+N nuevo · Ctrl+O abrir · Ctrl+S guardar · Ctrl+Shift+S guardar como · Ctrl+I importar · Ctrl+E exportar
  */
 export function useShortcuts() {
   useEffect(() => {
@@ -24,7 +26,12 @@ export function useShortcuts() {
       const key = e.key.toLowerCase();
 
       let handled = true;
-      if (ctrl && key === "z" && !e.shiftKey) s.undo();
+      if (ctrl && key === "n") newProject();
+      else if (ctrl && key === "o") openProject();
+      else if (ctrl && key === "s") (e.shiftKey ? saveProjectAs : saveProject)();
+      else if (ctrl && key === "i") document.getElementById("import-audio-input")?.click();
+      else if (ctrl && key === "e") exportWav();
+      else if (ctrl && key === "z" && !e.shiftKey) s.undo();
       else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) s.redo();
       else if (ctrl || e.altKey) handled = false;
       else if (e.code === "Space") togglePlay();

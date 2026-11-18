@@ -9,7 +9,9 @@ import { useProject } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { importAudioFiles } from "@/features/tracks/importAudio";
 import { togglePlay } from "@/features/shortcuts";
+import { projectName } from "@/project/projectFile";
 import { cn } from "@/lib/utils";
+import { FileMenu } from "./FileMenu";
 
 /** Envuelve un control con un tooltip que muestra su nombre y atajo. */
 function Tip({ label, children }: { label: string; children: ReactNode }) {
@@ -34,7 +36,14 @@ export function TransportBar() {
 
   return (
     <header className="flex h-14 items-center gap-3 border-b px-4">
-      <span className="mr-1 text-lg font-semibold tracking-tight">Riff</span>
+      <span className="text-lg font-semibold tracking-tight">Riff</span>
+      <FileMenu onImportAudio={() => fileInput.current?.click()} />
+      <span className="max-w-48 truncate text-sm text-muted-foreground" title={s.projectPath ?? undefined}>
+        {projectName(s.projectPath)}
+        {s.dirty && <span aria-label="cambios sin guardar"> •</span>}
+      </span>
+
+      <Separator orientation="vertical" className="h-6!" />
 
       <div className="flex items-center gap-1">
         <Tip label="Deshacer (Ctrl+Z)">
@@ -115,6 +124,7 @@ export function TransportBar() {
       <div className="ml-auto">
         <input
           ref={fileInput}
+          id="import-audio-input"
           type="file"
           accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aif,.aiff"
           multiple

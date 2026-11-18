@@ -5,9 +5,11 @@ import { TransportBar } from "@/features/transport/TransportBar";
 import { TrackList } from "@/features/tracks/TrackList";
 import { Mixer } from "@/features/mixer/Mixer";
 import { useShortcuts } from "@/features/shortcuts";
+import { useAppWindow } from "@/features/useAppWindow";
 
 export default function App() {
   useShortcuts();
+  useAppWindow();
 
   return (
     <TooltipProvider>
