@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import { encodeWav } from "./wav";
 import { useProject, type Clip, type LoopRegion, type Track } from "@/store/project";
 
 /**
@@ -45,14 +46,77 @@ export function getPeaks(bufferId: string) {
   return peaksCache.get(bufferId);
 }
 
+/** Bytes originales de cada audio (para guardarlo en el proyecto tal cual). */
+const sources = new Map<string, { bytes: Uint8Array; ext: string }>();
+
+/** Decodifica bytes de audio y los registra con el id dado. */
+export async function loadBuffer(bufferId: string, bytes: Uint8Array, ext: string) {
+  // decodeAudioData "consume" el ArrayBuffer, así que se decodifica una copia
+  const copy = bytes.slice().buffer;
+  const audio = await Tone.getContext().decodeAudioData(copy);
+  buffers.set(bufferId, new Tone.ToneAudioBuffer(audio));
+  peaksCache.set(bufferId, computePeaks(audio));
+  sources.set(bufferId, { bytes, ext });
+  return audio.duration;
+}
+
 /** Decodifica un archivo de audio y lo deja listo para usar en clips. */
 export async function decodeFile(file: File) {
-  const data = await file.arrayBuffer();
-  const audio = await Tone.getContext().decodeAudioData(data);
-  const id = crypto.randomUUID();
-  buffers.set(id, new Tone.ToneAudioBuffer(audio));
-  peaksCache.set(id, computePeaks(audio));
-  return { bufferId: id, duration: audio.duration };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const ext = file.name.match(/\.([^.]+)$/)?.[1]?.toLowerCase() ?? "wav";
+  const bufferId = crypto.randomUUID();
+  const duration = await loadBuffer(bufferId, bytes, ext);
+  return { bufferId, duration };
+}
+
+/** Audio de un buffer listo para escribir a disco (el original o, si no hay, un WAV). */
+export function getSource(bufferId: string) {
+  const src = sources.get(bufferId);
+  if (src) return src;
+  const buffer = buffers.get(bufferId)?.get();
+  return buffer ? { bytes: encodeWav(buffer), ext: "wav" } : undefined;
+}
+
+export function hasBuffer(bufferId: string) {
+  return buffers.has(bufferId);
+}
+
+/**
+ * Renderiza la mezcla completa (sin tiempo real) y la devuelve como WAV.
+ * Reconstruye el grafo de audio en un contexto offline con la misma configuración.
+ */
+export async function renderMixToWav(onProgress?: (p: number) => void) {
+  const { tracks, clips, bpm } = useProject.getState();
+  const end = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  if (end <= 0) throw new Error("El proyecto no tiene audio");
+  const duration = end + 1; // un segundo de cola
+
+  onProgress?.(0);
+  const rendered = await Tone.Offline(({ transport: t }) => {
+    t.bpm.value = bpm;
+    const chans = new Map<string, Tone.Channel>();
+    for (const tr of tracks) {
+      const ch = new Tone.Channel({
+        volume: tr.volume <= 0 ? -Infinity : Tone.gainToDb(tr.volume),
+        pan: tr.pan,
+        mute: tr.muted,
+        solo: tr.soloed,
+      }).toDestination();
+      chans.set(tr.id, ch);
+    }
+    for (const c of clips) {
+      const buffer = buffers.get(c.bufferId);
+      const ch = chans.get(c.trackId);
+      if (!buffer || !ch) continue;
+      new Tone.Player(buffer).connect(ch).sync().start(c.start, c.offset, c.duration);
+    }
+    t.start(0);
+  }, duration, 2);
+  onProgress?.(1);
+
+  const audio = rendered.get();
+  if (!audio) throw new Error("No se pudo renderizar");
+  return encodeWav(audio);
 }
 
 // --- Canales (uno por pista) ------------------------------------------------
