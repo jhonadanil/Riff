@@ -14,6 +14,7 @@ export function isAudioFile(file: File) {
  */
 export async function importAudioFiles(files: Iterable<File>, trackId: string, start: number) {
   let at = Math.max(0, start);
+  let first = true;
   for (const file of files) {
     if (!isAudioFile(file)) {
       toast.error(`"${file.name}" no es un archivo de audio`);
@@ -21,12 +22,17 @@ export async function importAudioFiles(files: Iterable<File>, trackId: string, s
     }
     try {
       const { bufferId, duration } = await decodeFile(file);
+      // Un solo paso de deshacer para toda la importación
+      if (first) useProject.getState().checkpoint();
+      first = false;
       useProject.getState().addClip({
         id: crypto.randomUUID(),
         trackId,
         name: file.name.replace(/\.[^.]+$/, ""),
         start: at,
+        offset: 0,
         duration,
+        sourceDuration: duration,
         bufferId,
       });
       at += duration;

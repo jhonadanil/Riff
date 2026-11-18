@@ -4,8 +4,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { TransportBar } from "@/features/transport/TransportBar";
 import { TrackList } from "@/features/tracks/TrackList";
 import { Mixer } from "@/features/mixer/Mixer";
+import { useShortcuts } from "@/features/shortcuts";
 
 export default function App() {
+  useShortcuts();
+
   return (
     <TooltipProvider>
       <div className="flex h-screen flex-col bg-background text-foreground">
