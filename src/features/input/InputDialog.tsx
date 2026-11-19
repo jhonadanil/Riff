@@ -2,11 +2,13 @@ import { AudioLines, Headphones, RotateCw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { retryInput, useInput, type InputChannel } from "@/audio/input";
+import { recordingLatencyMs, retryInput, useInput, type InputChannel } from "@/audio/input";
 import { cn } from "@/lib/utils";
 import { InputMeter } from "./InputMeter";
+import { NativeEngineSection } from "./NativeEngineSection";
 
 const DEFAULT = "__default";
 
@@ -45,7 +47,7 @@ function InputSettings() {
   const deviceLabel = devices.find((d) => d.id === deviceId)?.label ?? "el dispositivo predeterminado";
 
   return (
-    <DialogContent className="sm:max-w-md">
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Entrada de audio</DialogTitle>
         <DialogDescription>La interfaz o el micro con el que vas a grabar.</DialogDescription>
@@ -132,19 +134,56 @@ function InputSettings() {
           )}
         </div>
 
-        {latency && (
-          <p className="text-xs text-muted-foreground tabular-nums">
-            Latencia aproximada: {Math.round((latency.input ?? 0) + latency.output)} ms
-            {latency.input !== null && ` (entrada ${Math.round(latency.input)} + salida ${Math.round(latency.output)})`}
-          </p>
-        )}
+        {latency && <LatencySection />}
 
         <p className="flex items-start gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
           <Headphones className="mt-px size-3.5 shrink-0" />
           Para escucharte mientras tocas, pulsa el botón de auriculares en la pista. Usa auriculares si grabas con micro:
           con altavoces se acopla.
         </p>
+
+        <NativeEngineSection />
       </div>
     </DialogContent>
+  );
+}
+
+/** Latencia medida y compensación de las tomas (automática + ajuste fino). */
+function LatencySection() {
+  const { latency, latencyOffsetMs, setLatencyOffset } = useInput();
+  const { auto, total } = recordingLatencyMs();
+  if (!latency) return null;
+  const roundTrip = Math.round((latency.input ?? latency.output) + latency.output);
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="font-medium">Compensación al grabar</span>
+        <span className="text-muted-foreground tabular-nums">
+          {Math.round(total)} ms
+          {latencyOffsetMs !== 0 && ` (auto ${Math.round(auto)} ${latencyOffsetMs > 0 ? "+" : "−"} ${Math.abs(latencyOffsetMs)})`}
+        </span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="w-14 shrink-0 text-xs text-muted-foreground">Ajuste</span>
+        <Slider
+          min={-100}
+          max={200}
+          step={1}
+          value={[latencyOffsetMs]}
+          onValueChange={([v]) => setLatencyOffset(v)}
+          aria-label="Ajuste fino de la compensación (ms)"
+          className="flex-1"
+        />
+        <Button variant="ghost" size="xs" onClick={() => setLatencyOffset(0)} disabled={latencyOffsetMs === 0}>
+          0
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Las tomas se adelantan solas para cuadrar con el metrónomo. Si aun así quedan retrasadas, sube el ajuste; si quedan
+        adelantadas, bájalo. Al tocar te oyes con unos {roundTrip} ms de retraso
+        {latency.input === null && " (estimado)"}.
+      </p>
+    </div>
   );
 }

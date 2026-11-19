@@ -1,0 +1,8 @@
+# The project path has an accent ("app-musica" with u-acute) and the ASIO build
+# (asio-sys/bindgen) breaks on it, so compile into a plain-ASCII folder.
+[build]
+target-dir = "C:/Users/jhony/.riff-target"
+
+# libclang to generate the ASIO bindings (LLVM installed with winget)
+[env]
+LIBCLANG_PATH = "C:/Program Files/LLVM/bin"
