@@ -30,20 +30,25 @@ Marca `[x]` = hecho. El orden es el orden de trabajo recomendado.
 
 ## Fase 3 · Grabación
 - [x] Elegir entrada de audio (interfaz / micro) y monitorizar
-- [ ] Grabar en las pistas armadas, con cuenta previa
+- [x] Grabar en las pistas armadas, con cuenta previa
 - [ ] Compensación de latencia
 
-## Fase 4 · Rock: amplis, pedales y batería
+## Fase 4 · Motor nativo (Rust)
+Va antes que los amplis y pedales: así se escriben una sola vez, ya en tiempo real.
+- [ ] Motor de audio en Rust (cpal) con ASIO en Windows: elegir driver, dispositivo y tamaño de búfer
+- [ ] Monitorización de la entrada en tiempo real (baja latencia) desde el motor nativo
+- [ ] Puente UI ↔ motor mediante comandos/eventos de Tauri
+- [ ] Reproducción de clips, mixer y metrónomo en el motor nativo
+- [ ] Grabación en el motor nativo (con compensación de latencia)
+- [ ] Exportar la mezcla desde el motor nativo
+- [ ] Hosting de plugins VST3 / CLAP
+
+## Fase 5 · Rock: amplis, pedales y batería
 - [ ] Cadena de efectos por pista (insertar, reordenar, bypass)
 - [ ] Pedales: overdrive, distorsión, fuzz, delay, chorus, reverb, noise gate
 - [ ] Ampli: previo + EQ + simulación de pantalla (respuestas impulso / IR)
 - [ ] Afinador
 - [ ] Batería: sampler con kits gratis + secuenciador por pasos y patrones
-
-## Fase 5 · Motor nativo (Rust)
-- [ ] Motor de audio en Rust (cpal; ASIO en Windows) con baja latencia
-- [ ] Puente UI ↔ motor mediante comandos/eventos de Tauri
-- [ ] Hosting de plugins VST3 / CLAP
 
 ## Fase 6 · IA
 - [ ] Ideas a definir: generar baterías, sugerir tonos de ampli, separar pistas, mezcla asistida

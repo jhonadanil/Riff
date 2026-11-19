@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { useProject } from "@/store/project";
 import * as engine from "./engine";
-import { inputNode, useInput, waitForInput } from "./input";
+import { inputNode, recordingLatencyMs, useInput, waitForInput } from "./input";
 
 /**
  * Grabación desde la entrada de audio a las pistas armadas.
@@ -92,8 +92,13 @@ let onDone: (() => void) | null = null;
 /** Picos de la toma en curso para dibujarla mientras se graba. */
 export const LIVE_PEAKS_PER_SEC = 100;
 export const livePeaks: number[] = [];
-/** Muestra (del AudioContext) en la que empieza la toma. */
+/** Muestra (del AudioContext) en la que arranca el transporte al grabar. */
 let startFrame = 0;
+/**
+ * Muestra donde empieza de verdad la toma: lo tocado al ritmo de `startFrame`
+ * llega tarde por la latencia, así que se toma el audio desplazado.
+ */
+let captureFrame = 0;
 
 async function ensureNode() {
   if (node) return node;
@@ -129,8 +134,8 @@ function addLivePeaks(seg: Segment) {
   const len = seg.channels[0].length;
   for (let i = 0; i < len; i++) {
     const frame = seg.frame + i;
-    if (frame < startFrame) continue;
-    const p = Math.floor((frame - startFrame) / per);
+    if (frame < captureFrame) continue;
+    const p = Math.floor((frame - captureFrame) / per);
     let v = 0;
     for (const ch of seg.channels) v = Math.max(v, Math.abs(ch[i]));
     if (p >= livePeaks.length) livePeaks.push(v);
@@ -189,11 +194,13 @@ export async function startRecording() {
     segments = [];
     livePeaks.length = 0;
     engine.setRecordingMode(true);
+    const latencyFrames = Math.round((recordingLatencyMs().total / 1000) * ctx.sampleRate);
 
     if (isPlaying) {
       // Ya sonando: grabar desde ya, sin cuenta previa
       startTime = ctx.currentTime;
       startFrame = Math.round(startTime * ctx.sampleRate);
+      captureFrame = startFrame + latencyFrames;
       n.port.postMessage("start");
       useRecorder.setState({ phase: "recording", start: engine.positionAtTime(startTime) });
       return;
@@ -205,6 +212,7 @@ export async function startRecording() {
     const t0 = ctx.currentTime + 0.15;
     startTime = t0 + beats * beatSec;
     startFrame = Math.round(startTime * ctx.sampleRate);
+    captureFrame = startFrame + latencyFrames;
     n.port.postMessage("start"); // lo anterior a startFrame se descarta al final
     if (beats) cancelCountIn = engine.countIn(t0, beats, beatSec);
     useRecorder.setState({ phase: beats ? "countin" : "recording", start: from });
@@ -267,7 +275,9 @@ export async function stopRecording() {
   });
   engine.setRecordingMode(false);
 
-  const audio = assemble(startFrame, Math.round(stopTime * ctx.sampleRate));
+  // Lo que suena hasta stopTime entra `latencia` más tarde: se toma ese mismo tramo desplazado
+  const stopFrame = Math.round(stopTime * ctx.sampleRate);
+  const audio = assemble(captureFrame, Math.max(captureFrame, stopFrame - Math.max(0, startFrame - captureFrame)));
   segments = [];
   livePeaks.length = 0;
   useRecorder.setState({ phase: "idle", trackIds: [] });

@@ -35,32 +35,40 @@ type InputState = {
   panelOpen: boolean;
   /** Hay alguna pista armada: la entrada se deja abierta para grabar al instante. */
   armed: boolean;
+  /** Ajuste manual (ms) que se suma a la compensación automática al grabar. */
+  latencyOffsetMs: number;
+  /** El motor nativo se encarga de monitorizar (src/audio/native.ts): Web Audio no lo hace. */
+  nativeMonitor: boolean;
 
   setDevice: (deviceId: string | null) => void;
   setChannel: (channel: InputChannel) => void;
   toggleMonitor: (trackId: string) => void;
   setPanelOpen: (open: boolean) => void;
+  setLatencyOffset: (ms: number) => void;
 };
 
 // --- Preferencias guardadas -------------------------------------------------
 
 const PREFS_KEY = "riff.audioInput";
 
-function readPrefs(): { deviceId: string | null; channel: InputChannel } {
+type Prefs = { deviceId: string | null; channel: InputChannel; latencyOffsetMs: number };
+
+function readPrefs(): Prefs {
   try {
     const v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
     return {
       deviceId: typeof v.deviceId === "string" ? v.deviceId : null,
       channel: v.channel === "2" || v.channel === "stereo" ? v.channel : "1",
+      latencyOffsetMs: typeof v.latencyOffsetMs === "number" ? v.latencyOffsetMs : 0,
     };
   } catch {
-    return { deviceId: null, channel: "1" };
+    return { deviceId: null, channel: "1", latencyOffsetMs: 0 };
   }
 }
 
-function writePrefs(deviceId: string | null, channel: InputChannel) {
+function writePrefs(prefs: Prefs) {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ deviceId, channel }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // sin almacenamiento: se usará el predeterminado la próxima vez
   }
@@ -76,6 +84,7 @@ export const useInput = create<InputState>((set) => ({
   monitored: [],
   panelOpen: false,
   armed: useProject.getState().tracks.some((t) => t.armed),
+  nativeMonitor: false,
 
   setDevice: (deviceId) => set({ deviceId }),
   setChannel: (channel) => set({ channel }),
@@ -84,6 +93,7 @@ export const useInput = create<InputState>((set) => ({
       monitored: s.monitored.includes(trackId) ? s.monitored.filter((id) => id !== trackId) : [...s.monitored, trackId],
     })),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
+  setLatencyOffset: (ms) => set({ latencyOffsetMs: Math.round(Math.min(200, Math.max(-100, ms))) }),
 }));
 
 // --- Dispositivos -----------------------------------------------------------
@@ -250,9 +260,9 @@ function safeDisconnect(ch: Tone.Channel) {
 }
 
 function syncMonitoring() {
-  const { monitored, status } = useInput.getState();
+  const { monitored, status, nativeMonitor } = useInput.getState();
   const want = new Map<string, Tone.Channel>();
-  if (status === "open") {
+  if (status === "open" && !nativeMonitor) {
     for (const id of monitored) {
       const ch = engine.trackChannel(id);
       if (ch) want.set(id, ch);
@@ -277,7 +287,9 @@ function syncMonitoring() {
 const needsInput = (s: InputState) => s.panelOpen || s.armed || s.monitored.length > 0;
 
 useInput.subscribe((s, prev) => {
-  if (s.deviceId !== prev.deviceId || s.channel !== prev.channel) writePrefs(s.deviceId, s.channel);
+  if (s.deviceId !== prev.deviceId || s.channel !== prev.channel || s.latencyOffsetMs !== prev.latencyOffsetMs) {
+    writePrefs({ deviceId: s.deviceId, channel: s.channel, latencyOffsetMs: s.latencyOffsetMs });
+  }
 
   const wanted = needsInput(s);
   if (wanted && (s.status === "closed" || s.deviceId !== prev.deviceId)) {
@@ -289,7 +301,7 @@ useInput.subscribe((s, prev) => {
   }
 
   if (s.channel !== prev.channel) buildRoute();
-  if (s.monitored !== prev.monitored || s.status !== prev.status) syncMonitoring();
+  if (s.monitored !== prev.monitored || s.status !== prev.status || s.nativeMonitor !== prev.nativeMonitor) syncMonitoring();
 });
 
 // Al borrar pistas (o abrir otro proyecto) dejar de monitorizar las que ya no existen
@@ -321,6 +333,18 @@ export function waitForInput(timeoutMs = 8000): Promise<boolean> {
       resolve(s.status === "open");
     });
   });
+}
+
+/**
+ * Cuánto llega tarde lo grabado respecto a la línea de tiempo (ms):
+ * oyes el metrónomo con la latencia de salida y tu nota entra con la de entrada.
+ * Si el sistema no informa de la de entrada, se supone igual a la de salida
+ * (los búferes de Windows suelen ser simétricos). Más el ajuste manual.
+ */
+export function recordingLatencyMs() {
+  const { latency, latencyOffsetMs } = useInput.getState();
+  const auto = latency ? (latency.input ?? latency.output) + latency.output : 0;
+  return { auto, offset: latencyOffsetMs, total: auto + latencyOffsetMs };
 }
 
 /** Nodo con la señal de entrada ya elegida (mono o estéreo), para grabarla. */
