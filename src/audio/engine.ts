@@ -146,6 +146,11 @@ function syncTracks(tracks: Track[]) {
   }
 }
 
+/** Canal de mezcla de una pista (para enrutar la entrada al monitorizar). */
+export function trackChannel(trackId: string) {
+  return channels.get(trackId);
+}
+
 // --- Players (uno por clip) -------------------------------------------------
 
 type PlayerEntry = { player: Tone.Player; key: string };

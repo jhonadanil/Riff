@@ -2,7 +2,6 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { Circle, FileAudio, Magnet, Pause, Play, Redo2, Repeat, SkipBack, Timer, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useProject } from "@/store/project";
@@ -12,6 +11,8 @@ import { togglePlay } from "@/features/shortcuts";
 import { projectName } from "@/project/projectFile";
 import { cn } from "@/lib/utils";
 import { FileMenu } from "./FileMenu";
+import { InputButton } from "@/features/input/InputDialog";
+import { ThemeMenu } from "@/features/theme/ThemeMenu";
 
 /** Envuelve un control con un tooltip que muestra su nombre y atajo. */
 function Tip({ label, children }: { label: string; children: ReactNode }) {
@@ -35,93 +36,105 @@ export function TransportBar() {
   };
 
   return (
-    <header className="flex h-14 items-center gap-3 border-b px-4">
-      <span className="text-lg font-semibold tracking-tight">Riff</span>
-      <FileMenu onImportAudio={() => fileInput.current?.click()} />
-      <span className="max-w-48 truncate text-sm text-muted-foreground" title={s.projectPath ?? undefined}>
-        {projectName(s.projectPath)}
-        {s.dirty && <span aria-label="cambios sin guardar"> •</span>}
-      </span>
-
-      <Separator orientation="vertical" className="h-6!" />
-
-      <div className="flex items-center gap-1">
-        <Tip label="Deshacer (Ctrl+Z)">
-          <Button variant="ghost" size="icon-sm" onClick={s.undo} disabled={!s.past.length} aria-label="Deshacer">
-            <Undo2 />
-          </Button>
-        </Tip>
-        <Tip label="Rehacer (Ctrl+Y)">
-          <Button variant="ghost" size="icon-sm" onClick={s.redo} disabled={!s.future.length} aria-label="Rehacer">
-            <Redo2 />
-          </Button>
-        </Tip>
+    <header className="grid h-16 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b px-4">
+      {/* Izquierda: proyecto */}
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="pr-1 pl-1 text-[17px] font-semibold tracking-[-0.02em]">Riff</span>
+        <FileMenu onImportAudio={() => fileInput.current?.click()} />
+        <span className="min-w-0 truncate text-sm text-muted-foreground" title={s.projectPath ?? undefined}>
+          {projectName(s.projectPath)}
+          {s.dirty && <span aria-label="cambios sin guardar"> •</span>}
+        </span>
+        <div className="ml-1 flex items-center">
+          <Tip label="Deshacer (Ctrl+Z)">
+            <Button variant="ghost" size="icon-sm" onClick={s.undo} disabled={!s.past.length} aria-label="Deshacer">
+              <Undo2 />
+            </Button>
+          </Tip>
+          <Tip label="Rehacer (Ctrl+Y)">
+            <Button variant="ghost" size="icon-sm" onClick={s.redo} disabled={!s.future.length} aria-label="Rehacer">
+              <Redo2 />
+            </Button>
+          </Tip>
+        </div>
       </div>
 
-      <Separator orientation="vertical" className="h-6!" />
+      {/* Centro: transporte */}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+          <Tip label="Volver al inicio (Inicio)">
+            <Button variant="ghost" size="icon" className="hover:bg-raised" onClick={() => engine.seek(0)} aria-label="Volver al inicio">
+              <SkipBack />
+            </Button>
+          </Tip>
+          <Tip label={`${s.isPlaying ? "Pausar" : "Reproducir"} (Espacio)`}>
+            <Button
+              size="icon-lg"
+              className="hover:bg-primary/85"
+              onClick={togglePlay}
+              aria-label={s.isPlaying ? "Pausar" : "Reproducir"}
+            >
+              {s.isPlaying ? <Pause className="fill-current" /> : <Play className="translate-x-px fill-current" />}
+            </Button>
+          </Tip>
+          <Tip label="Grabar (próximamente)">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("hover:bg-raised", s.isRecording && "bg-red-500/12 hover:bg-red-500/20")}
+              onClick={s.toggleRecording}
+              aria-label="Grabar"
+              aria-pressed={s.isRecording}
+            >
+              <Circle className={cn("size-3.5 fill-current", s.isRecording ? "text-red-500" : "text-red-500/80")} />
+            </Button>
+          </Tip>
+        </div>
 
-      <div className="flex items-center gap-1">
-        <Tip label="Volver al inicio (Inicio)">
-          <Button variant="ghost" size="icon" onClick={() => engine.seek(0)} aria-label="Volver al inicio">
-            <SkipBack />
-          </Button>
-        </Tip>
-        <Tip label={`${s.isPlaying ? "Pausar" : "Reproducir"} (Espacio)`}>
-          <Button
-            variant={s.isPlaying ? "secondary" : "ghost"}
-            size="icon"
-            onClick={togglePlay}
-            aria-label={s.isPlaying ? "Pausar" : "Reproducir"}
-          >
-            {s.isPlaying ? <Pause /> : <Play />}
-          </Button>
-        </Tip>
-        <Tip label="Grabar (próximamente)">
-          <Button variant="ghost" size="icon" onClick={s.toggleRecording} aria-label="Grabar">
-            <Circle className={cn(s.isRecording && "fill-red-500 text-red-500")} />
-          </Button>
-        </Tip>
+        <TimeDisplay />
+
+        <label className="flex h-11 items-center gap-2 rounded-full bg-muted pr-1 pl-4 text-xs font-medium text-muted-foreground">
+          BPM
+          <Input
+            type="number"
+            className="h-9 w-16 border-0 bg-raised text-center font-medium text-foreground tabular-nums shadow-raised dark:bg-raised"
+            defaultValue={s.bpm}
+            key={s.bpm}
+            min={20}
+            max={300}
+            onBlur={(e) => {
+              const v = Number(e.target.value);
+              if (v >= 20 && v <= 300) s.setBpm(v);
+              else e.target.value = String(s.bpm);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          />
+        </label>
       </div>
 
-      <TimeDisplay />
+      {/* Derecha: ayudas, entrada y tema */}
+      <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
+          <Tip label="Metrónomo (M)">
+            <Toggle className={pillToggle} pressed={s.metronome} onPressedChange={s.toggleMetronome} aria-label="Metrónomo">
+              <Timer />
+            </Toggle>
+          </Tip>
+          <Tip label={s.loop ? "Loop (L)" : "Loop (L) · arrastra en la regla para crear la región"}>
+            <Toggle className={pillToggle} pressed={s.loopEnabled} onPressedChange={s.toggleLoop} disabled={!s.loop} aria-label="Loop">
+              <Repeat />
+            </Toggle>
+          </Tip>
+          <Tip label="Ajustar a la rejilla (G)">
+            <Toggle className={pillToggle} pressed={s.snap} onPressedChange={s.toggleSnap} aria-label="Ajustar a la rejilla">
+              <Magnet />
+            </Toggle>
+          </Tip>
+        </div>
 
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        BPM
-        <Input
-          type="number"
-          className="h-8 w-20 tabular-nums"
-          defaultValue={s.bpm}
-          key={s.bpm}
-          min={20}
-          max={300}
-          onBlur={(e) => {
-            const v = Number(e.target.value);
-            if (v >= 20 && v <= 300) s.setBpm(v);
-            else e.target.value = String(s.bpm);
-          }}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        />
-      </label>
+        <InputButton />
+        <ThemeMenu />
 
-      <div className="flex items-center gap-1">
-        <Tip label="Metrónomo (M)">
-          <Toggle size="sm" pressed={s.metronome} onPressedChange={s.toggleMetronome} aria-label="Metrónomo">
-            <Timer />
-          </Toggle>
-        </Tip>
-        <Tip label={s.loop ? "Loop (L)" : "Loop (L) · arrastra en la regla para crear la región"}>
-          <Toggle size="sm" pressed={s.loopEnabled} onPressedChange={s.toggleLoop} disabled={!s.loop} aria-label="Loop">
-            <Repeat />
-          </Toggle>
-        </Tip>
-        <Tip label="Ajustar a la rejilla (G)">
-          <Toggle size="sm" pressed={s.snap} onPressedChange={s.toggleSnap} aria-label="Ajustar a la rejilla">
-            <Magnet />
-          </Toggle>
-        </Tip>
-      </div>
-
-      <div className="ml-auto">
         <input
           ref={fileInput}
           id="import-audio-input"
@@ -134,7 +147,7 @@ export function TransportBar() {
             e.target.value = "";
           }}
         />
-        <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
+        <Button variant="outline" onClick={() => fileInput.current?.click()} className="h-9 px-4">
           <FileAudio />
           Importar audio
         </Button>
@@ -142,6 +155,10 @@ export function TransportBar() {
     </header>
   );
 }
+
+/** Conmutador dentro de un grupo gris: el activo se "levanta" en blanco (o gris claro en oscuro). */
+const pillToggle =
+  "size-9 rounded-full text-muted-foreground hover:bg-raised/70 hover:text-foreground data-[state=on]:bg-raised data-[state=on]:text-foreground data-[state=on]:shadow-raised aria-pressed:bg-raised";
 
 /** Posición actual (min:seg y compás.tiempo), actualizada cada frame. */
 function TimeDisplay() {
@@ -167,7 +184,7 @@ function TimeDisplay() {
   return (
     <span
       ref={ref}
-      className="min-w-36 rounded-md bg-muted px-2.5 py-1 font-mono text-sm whitespace-pre tabular-nums"
+      className="flex h-11 min-w-44 items-center justify-center rounded-full bg-muted px-5 text-[15px] font-medium whitespace-pre tabular-nums"
       aria-label="Posición"
     />
   );
