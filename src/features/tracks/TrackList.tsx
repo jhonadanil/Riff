@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Headphones, Pencil, Plus, Trash2 } from "lucide-react";
+import { Headphones, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -244,6 +244,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
 /**
  * Regla con números de compás (4/4).
  * Clic = mover el cursor. Arrastrar = crear región de loop.
+ * Doble clic sobre la región o clic derecho › «Quitar loop» = borrarla.
  */
 function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number; width: number; timeAt: (clientX: number) => number }) {
   const { loop, loopEnabled, setLoop } = useProject();
@@ -255,40 +256,55 @@ function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number
   const bars = Math.ceil(width / barPx);
 
   return (
-    <div
-      className="relative shrink-0 cursor-pointer overflow-hidden text-[11px] text-muted-foreground tabular-nums"
-      style={{ width }}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        drag.current = { x: e.clientX, t: snapTime(timeAt(e.clientX)) };
-      }}
-      onPointerMove={(e) => {
-        const d = drag.current;
-        if (!d || Math.abs(e.clientX - d.x) < 4) return;
-        const t = snapTime(timeAt(e.clientX));
-        if (t !== d.t) setLoop({ start: Math.min(d.t, t), end: Math.max(d.t, t) });
-      }}
-      onPointerUp={(e) => {
-        const d = drag.current;
-        drag.current = null;
-        if (d && Math.abs(e.clientX - d.x) < 4) engine.seek(timeAt(e.clientX));
-      }}
-    >
-      {loop && (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
         <div
-          className={cn("absolute inset-y-1 rounded-full", loopEnabled ? "bg-foreground/20" : "bg-foreground/8")}
-          style={{ left: loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
-        />
-      )}
-      {Array.from({ length: Math.ceil(bars / every) }, (_, i) => {
-        const bar = i * every;
-        return (
-          <span key={bar} className="absolute bottom-0 h-full border-l border-grid-line pt-1.5 pl-1.5" style={{ left: bar * barPx }}>
-            {bar + 1}
-          </span>
-        );
-      })}
-    </div>
+          className="relative shrink-0 cursor-pointer overflow-hidden text-[11px] text-muted-foreground tabular-nums"
+          style={{ width }}
+          onDoubleClick={(e) => {
+          const t = timeAt(e.clientX);
+          if (loop && t >= loop.start && t <= loop.end) setLoop(null);
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return; // el clic derecho abre el menú
+            e.currentTarget.setPointerCapture(e.pointerId);
+            drag.current = { x: e.clientX, t: snapTime(timeAt(e.clientX)) };
+          }}
+          onPointerMove={(e) => {
+            const d = drag.current;
+            if (!d || Math.abs(e.clientX - d.x) < 4) return;
+            const t = snapTime(timeAt(e.clientX));
+            if (t !== d.t) setLoop({ start: Math.min(d.t, t), end: Math.max(d.t, t) });
+          }}
+          onPointerUp={(e) => {
+            const d = drag.current;
+            drag.current = null;
+            if (d && Math.abs(e.clientX - d.x) < 4) engine.seek(timeAt(e.clientX));
+          }}
+        >
+          {loop && (
+            <div
+              className={cn("absolute inset-y-1 rounded-full", loopEnabled ? "bg-foreground/20" : "bg-foreground/8")}
+              style={{ left: loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
+            />
+          )}
+          {Array.from({ length: Math.ceil(bars / every) }, (_, i) => {
+            const bar = i * every;
+            return (
+              <span key={bar} className="absolute bottom-0 h-full border-l border-grid-line pt-1.5 pl-1.5" style={{ left: bar * barPx }}>
+                {bar + 1}
+              </span>
+            );
+          })}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={!loop} onSelect={() => setLoop(null)}>
+          <Repeat />
+          Quitar loop
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

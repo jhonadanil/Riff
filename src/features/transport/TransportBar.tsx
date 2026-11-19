@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { FileMenu } from "./FileMenu";
 import { InputButton } from "@/features/input/InputDialog";
 import { ThemeMenu } from "@/features/theme/ThemeMenu";
+import { ShortcutsButton } from "@/features/ShortcutsDialog";
 
 /** Envuelve un control con un tooltip que muestra su nombre y atajo. */
 function Tip({ label, children }: { label: string; children: ReactNode }) {
@@ -112,7 +113,7 @@ export function TransportBar() {
         </label>
       </div>
 
-      {/* Derecha: ayudas, entrada y tema */}
+      {/* Derecha: ayudas, entrada, atajos y tema */}
       <div className="flex items-center justify-end gap-2">
         <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
           <Tip label="Metrónomo (M)">
@@ -133,6 +134,7 @@ export function TransportBar() {
         </div>
 
         <InputButton />
+        <ShortcutsButton />
         <ThemeMenu />
 
         <input
