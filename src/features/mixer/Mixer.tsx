@@ -9,9 +9,9 @@ export function Mixer() {
   const { tracks, updateTrack } = useProject();
 
   return (
-    <div className="flex h-full gap-px overflow-x-auto bg-border">
+    <div className="flex h-full overflow-x-auto bg-background">
       {tracks.map((t) => (
-        <div key={t.id} className="flex w-24 shrink-0 flex-col items-center gap-2 bg-background py-3">
+        <div key={t.id} className="flex h-full w-24 shrink-0 flex-col items-center gap-2 border-r pt-4 pb-3">
           <div className="flex w-full flex-col items-center gap-1 px-3">
             <Slider
               min={-1}
@@ -49,7 +49,7 @@ export function Mixer() {
           <span className="text-xs tabular-nums text-muted-foreground">{Math.round(t.volume * 100)}</span>
           <Slider
             orientation="vertical"
-            className="min-h-0 flex-1"
+            className="min-h-0 flex-1 data-vertical:min-h-16"
             min={0}
             max={1}
             step={0.01}

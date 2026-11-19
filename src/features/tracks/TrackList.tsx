@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Headphones, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -10,11 +10,12 @@ import {
 } from "@/components/ui/context-menu";
 import { gridSeconds, snapTime, useProject, type Track } from "@/store/project";
 import * as engine from "@/audio/engine";
+import { useInput } from "@/audio/input";
 import { cn } from "@/lib/utils";
 import { ClipView, TRACK_H } from "./ClipView";
 import { importAudioFiles } from "./importAudio";
 
-const HEADER_W = 224; // ancho de la cabecera de pista (w-56)
+const HEADER_W = 248; // ancho de la cabecera de pista
 const RULER_H = 28;
 const MIN_LENGTH_SEC = engine.EMPTY_SONG_SEC; // la línea de tiempo nunca es más corta que esto
 const TAIL_SEC = 30; // espacio libre tras el último clip
@@ -81,8 +82,8 @@ export function TrackList() {
 
             <div
               className={cn(
-                "relative flex-1 bg-muted/20 transition-colors",
-                dropTrackId === t.id && "bg-primary/10 outline-2 -outline-offset-2 outline-primary/50 outline-dashed",
+                "relative flex-1 bg-lane transition-colors",
+                dropTrackId === t.id && "bg-foreground/5 outline-2 -outline-offset-4 outline-foreground/30 outline-dashed",
               )}
               onClick={(e) => {
                 selectTrack(t.id);
@@ -118,11 +119,6 @@ export function TrackList() {
             <Plus />
             Añadir pista
           </Button>
-          {clips.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Arrastra archivos de audio (WAV, MP3, FLAC…) a una pista, o usa «Importar audio».
-            </p>
-          )}
         </div>
 
         {/* Región de loop sobre las pistas */}
@@ -130,7 +126,7 @@ export function TrackList() {
           <div
             className={cn(
               "pointer-events-none absolute bottom-0 z-[4] border-x",
-              loopEnabled ? "border-sky-500/60 bg-sky-500/8" : "border-muted-foreground/30 bg-muted-foreground/5",
+              loopEnabled ? "border-foreground/35 bg-foreground/[0.045]" : "border-dashed border-foreground/15",
             )}
             style={{ top: RULER_H, left: HEADER_W + loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
           />
@@ -145,6 +141,8 @@ export function TrackList() {
 function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean }) {
   const selected = useProject((s) => s.selectedTrackId === t.id);
   const { updateTrack, selectTrack, removeTrack } = useProject();
+  const monitoring = useInput((s) => s.monitored.includes(t.id));
+  const toggleMonitor = useInput((s) => s.toggleMonitor);
   const [editing, setEditing] = useState(false);
 
   const rename = (name: string) => {
@@ -161,8 +159,8 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            "sticky left-0 z-10 flex shrink-0 cursor-default items-center gap-1 border-r bg-background px-3",
-            selected && "bg-accent",
+            "sticky left-0 z-10 flex shrink-0 cursor-default items-center gap-0.5 border-r bg-background pr-2 pl-3",
+            selected && "bg-lane-selected",
           )}
           style={{ width: HEADER_W }}
           onClick={() => selectTrack(t.id)}
@@ -186,7 +184,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
             </span>
           )}
           <Button
-            size="icon-sm"
+            size="icon-xs"
             variant={t.muted ? "secondary" : "ghost"}
             className={cn(t.muted && "text-amber-500")}
             onClick={() => updateTrack(t.id, { muted: !t.muted })}
@@ -196,7 +194,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
             M
           </Button>
           <Button
-            size="icon-sm"
+            size="icon-xs"
             variant={t.soloed ? "secondary" : "ghost"}
             className={cn(t.soloed && "text-sky-500")}
             onClick={() => updateTrack(t.id, { soloed: !t.soloed })}
@@ -206,7 +204,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
             S
           </Button>
           <Button
-            size="icon-sm"
+            size="icon-xs"
             variant="ghost"
             className={cn(t.armed && "text-red-500")}
             onClick={() => updateTrack(t.id, { armed: !t.armed })}
@@ -214,6 +212,17 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
             aria-pressed={t.armed}
           >
             R
+          </Button>
+          <Button
+            size="icon-xs"
+            variant={monitoring ? "secondary" : "ghost"}
+            className={cn(monitoring && "text-emerald-500")}
+            onClick={() => toggleMonitor(t.id)}
+            aria-label="Monitorizar entrada"
+            title="Monitorizar entrada (escucharte al tocar)"
+            aria-pressed={monitoring}
+          >
+            <Headphones />
           </Button>
         </div>
       </ContextMenuTrigger>
@@ -267,14 +276,14 @@ function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number
     >
       {loop && (
         <div
-          className={cn("absolute inset-y-0", loopEnabled ? "bg-sky-500/30" : "bg-muted-foreground/15")}
+          className={cn("absolute inset-y-1 rounded-full", loopEnabled ? "bg-foreground/20" : "bg-foreground/8")}
           style={{ left: loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
         />
       )}
       {Array.from({ length: Math.ceil(bars / every) }, (_, i) => {
         const bar = i * every;
         return (
-          <span key={bar} className="absolute bottom-0 h-full border-l border-border pl-1 pt-1" style={{ left: bar * barPx }}>
+          <span key={bar} className="absolute bottom-0 h-full border-l border-grid-line pt-1.5 pl-1.5" style={{ left: bar * barPx }}>
             {bar + 1}
           </span>
         );
@@ -288,10 +297,10 @@ function GridLines({ bpm, pxPerSec }: { bpm: number; pxPerSec: number }) {
   const barPx = (60 / bpm) * 4 * pxPerSec;
   const every = Math.max(1, 2 ** Math.ceil(Math.log2(40 / barPx)));
   const beatPx = gridSeconds(bpm, pxPerSec) * pxPerSec;
-  const layers = [`repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${barPx * every}px)`];
+  const layers = [`repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px ${barPx * every}px)`];
   if (beatPx < barPx) {
     layers.push(
-      `repeating-linear-gradient(to right, color-mix(in oklch, var(--border) 45%, transparent) 0 1px, transparent 1px ${beatPx}px)`,
+      `repeating-linear-gradient(to right, color-mix(in oklch, var(--grid-line) 45%, transparent) 0 1px, transparent 1px ${beatPx}px)`,
     );
   }
   return <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: layers.join(",") }} />;
@@ -326,7 +335,7 @@ function Playhead({ pxPerSec, scrollRef }: { pxPerSec: number; scrollRef: React.
   return (
     <div
       ref={ref}
-      className="pointer-events-none absolute top-0 bottom-0 z-[25] w-px bg-red-500"
+      className="pointer-events-none absolute top-0 bottom-0 z-[25] w-px bg-playhead"
       style={{ left: HEADER_W }}
     />
   );

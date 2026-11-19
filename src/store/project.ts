@@ -124,11 +124,10 @@ export function emptyProject(): ProjectData {
   return {
     bpm: 120,
     tracks: [
-      track(crypto.randomUUID(), "Guitarra L", TRACK_COLORS[0], -0.6),
-      track(crypto.randomUUID(), "Guitarra R", TRACK_COLORS[1], 0.6),
-      track(crypto.randomUUID(), "Bajo", TRACK_COLORS[2]),
-      track(crypto.randomUUID(), "Batería", TRACK_COLORS[3]),
-      track(crypto.randomUUID(), "Voz", TRACK_COLORS[4]),
+      track(crypto.randomUUID(), "Guitarra", TRACK_COLORS[0]),
+      track(crypto.randomUUID(), "Bajo", TRACK_COLORS[1]),
+      track(crypto.randomUUID(), "Batería", TRACK_COLORS[2]),
+      track(crypto.randomUUID(), "Voz", TRACK_COLORS[3]),
     ],
     clips: [],
     loop: null,

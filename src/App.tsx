@@ -1,4 +1,5 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { ThemeProvider } from "next-themes";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { TransportBar } from "@/features/transport/TransportBar";
@@ -6,10 +7,20 @@ import { TrackList } from "@/features/tracks/TrackList";
 import { Mixer } from "@/features/mixer/Mixer";
 import { useShortcuts } from "@/features/shortcuts";
 import { useAppWindow } from "@/features/useAppWindow";
+import { useNativeTheme } from "@/features/theme/ThemeMenu";
 
 export default function App() {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <Shell />
+    </ThemeProvider>
+  );
+}
+
+function Shell() {
   useShortcuts();
   useAppWindow();
+  useNativeTheme();
 
   return (
     <TooltipProvider>

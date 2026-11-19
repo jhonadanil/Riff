@@ -29,7 +29,7 @@ Marca `[x]` = hecho. El orden es el orden de trabajo recomendado.
 - [x] Aviso de cambios sin guardar al cerrar, abrir o crear proyecto
 
 ## Fase 3 · Grabación
-- [ ] Elegir entrada de audio (interfaz / micro) y monitorizar
+- [x] Elegir entrada de audio (interfaz / micro) y monitorizar
 - [ ] Grabar en las pistas armadas, con cuenta previa
 - [ ] Compensación de latencia
 
