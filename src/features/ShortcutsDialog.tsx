@@ -10,6 +10,8 @@ const GROUPS: { title: string; items: [keys: string[], label: string][] }[] = [
     title: "Transporte",
     items: [
       [["Espacio"], "Reproducir / pausar"],
+      [["R"], "Grabar / parar la grabación"],
+      [["C"], "Cuenta previa antes de grabar"],
       [["Inicio"], "Volver al inicio"],
       [["M"], "Metrónomo"],
       [["L"], "Activar / desactivar loop"],

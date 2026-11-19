@@ -77,6 +77,14 @@ export function getSource(bufferId: string) {
   return buffer ? { bytes: encodeWav(buffer), ext: "wav" } : undefined;
 }
 
+/** Registra audio grabado (sin archivo original: al guardar se escribe como WAV). */
+export function addRecordedBuffer(audio: AudioBuffer) {
+  const bufferId = crypto.randomUUID();
+  buffers.set(bufferId, new Tone.ToneAudioBuffer(audio));
+  peaksCache.set(bufferId, computePeaks(audio));
+  return bufferId;
+}
+
 export function hasBuffer(bufferId: string) {
   return buffers.has(bufferId);
 }
@@ -214,11 +222,25 @@ function setMetronome(on: boolean) {
   }, "4n", 0);
 }
 
+/**
+ * Cuenta previa: `beats` clics a partir de `time` (tiempo del AudioContext).
+ * Usa su propio sintetizador para poder cortarla de golpe si se cancela.
+ */
+export function countIn(time: number, beats: number, beatSec: number) {
+  const synth = new Tone.Synth({
+    oscillator: { type: "square" },
+    envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 },
+    volume: -8,
+  }).toDestination();
+  for (let i = 0; i < beats; i++) synth.triggerAttackRelease(i % 4 === 0 ? "C6" : "G5", 0.03, time + i * beatSec);
+  return () => synth.dispose();
+}
+
 // --- Loop -------------------------------------------------------------------
 
 function setLoop(loop: LoopRegion | null, enabled: boolean) {
   const t = transport();
-  if (loop && enabled && loop.end > loop.start) {
+  if (loop && enabled && loop.end > loop.start && !recording) {
     t.setLoopPoints(loop.start, loop.end);
     t.loop = true;
   } else {
@@ -241,11 +263,25 @@ export function songEnd(clips: Clip[] = useProject.getState().clips) {
 /** Programa la parada automática al llegar al final de la canción. */
 function scheduleEnd(clips: Clip[]) {
   if (endEvent !== null) transport().clear(endEvent);
+  endEvent = null;
+  if (recording) return; // grabando, la canción crece: no parar al final
   endEvent = transport().schedule((time) => {
     // Con loop activo dentro de la canción nunca se llega aquí
     transport().pause(time);
     Tone.getDraw().schedule(() => useProject.getState().setPlaying(false), time);
   }, songEnd(clips));
+}
+
+// --- Modo grabación ----------------------------------------------------------
+
+/** Mientras se graba no hay loop ni parada al final, y el cursor no se puede mover. */
+let recording = false;
+
+export function setRecordingMode(on: boolean) {
+  recording = on;
+  const s = useProject.getState();
+  setLoop(s.loop, s.loopEnabled);
+  scheduleEnd(s.clips);
 }
 
 // Mantener el audio en sincronía con el store
@@ -290,9 +326,29 @@ export function pause() {
   transport().pause();
 }
 
+const seekListeners = new Set<(seconds: number) => void>();
+
+/** Avisa cada vez que el cursor salta (p. ej. para que la vista lo siga). */
+export function onSeek(fn: (seconds: number) => void) {
+  seekListeners.add(fn);
+  return () => void seekListeners.delete(fn);
+}
+
 /** Mueve el cursor de reproducción (en segundos). */
 export function seek(seconds: number) {
+  if (recording) return;
   transport().seconds = Math.max(0, seconds);
+  seekListeners.forEach((fn) => fn(Math.max(0, seconds)));
+}
+
+/** Arranca el transporte en `time` (AudioContext) desde la posición `offset` (s). */
+export function startAt(time: number, offset: number) {
+  transport().start(time, Math.max(0, offset));
+}
+
+/** Posición del transporte (s) que corresponde a un instante del AudioContext. */
+export function positionAtTime(time: number) {
+  return transport().getSecondsAtTime(time);
 }
 
 /** Posición actual del transporte en segundos. */
