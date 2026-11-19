@@ -13,6 +13,7 @@ import * as engine from "@/audio/engine";
 import { useInput } from "@/audio/input";
 import { cn } from "@/lib/utils";
 import { ClipView, TRACK_H } from "./ClipView";
+import { RecordingClip, useRecordingEnd } from "./RecordingClip";
 import { importAudioFiles } from "./importAudio";
 
 const HEADER_W = 248; // ancho de la cabecera de pista
@@ -25,7 +26,8 @@ export function TrackList() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dropTrackId, setDropTrackId] = useState<string | null>(null);
 
-  const lastEnd = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  const recordingEnd = useRecordingEnd();
+  const lastEnd = clips.reduce((m, c) => Math.max(m, c.start + c.duration), recordingEnd);
   const lengthSec = Math.max(MIN_LENGTH_SEC, lastEnd + TAIL_SEC);
   const timelineW = lengthSec * pxPerSec;
 
@@ -35,6 +37,32 @@ export function TrackList() {
     const x = clientX - el.getBoundingClientRect().left + el.scrollLeft - HEADER_W;
     return Math.max(0, x / pxPerSec);
   };
+
+  // La vista sigue al cursor: si salta fuera de la pantalla, o si al reproducir llega al borde derecho
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    /** Lleva la vista hasta `t` si no se ve; `margin` = parte del ancho que se deja a la izquierda. */
+    const reveal = (t: number, margin: number) => {
+      const { pxPerSec: z } = useProject.getState();
+      const x = t * z;
+      const view = el.clientWidth - HEADER_W;
+      if (x < el.scrollLeft || x > el.scrollLeft + view - 8) {
+        el.scrollTo({ left: Math.max(0, x - view * margin) });
+      }
+    };
+    const offSeek = engine.onSeek((t) => reveal(t, 0.1));
+    let raf = 0;
+    const follow = () => {
+      if (useProject.getState().isPlaying) reveal(engine.position(), 0.05);
+      raf = requestAnimationFrame(follow);
+    };
+    raf = requestAnimationFrame(follow);
+    return () => {
+      offSeek();
+      cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // Ctrl + rueda = zoom horizontal, manteniendo fijo el punto bajo el ratón
   useEffect(() => {
@@ -110,6 +138,7 @@ export function TrackList() {
                 .map((c) => (
                   <ClipView key={c.id} clip={c} color={t.color} pxPerSec={pxPerSec} />
                 ))}
+              <RecordingClip trackId={t.id} pxPerSec={pxPerSec} />
             </div>
           </div>
         ))}

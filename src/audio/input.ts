@@ -33,6 +33,8 @@ type InputState = {
   monitored: string[];
   /** El diálogo de entrada está visible (necesita el medidor). */
   panelOpen: boolean;
+  /** Hay alguna pista armada: la entrada se deja abierta para grabar al instante. */
+  armed: boolean;
 
   setDevice: (deviceId: string | null) => void;
   setChannel: (channel: InputChannel) => void;
@@ -73,6 +75,7 @@ export const useInput = create<InputState>((set) => ({
   latency: null,
   monitored: [],
   panelOpen: false,
+  armed: useProject.getState().tracks.some((t) => t.armed),
 
   setDevice: (deviceId) => set({ deviceId }),
   setChannel: (channel) => set({ channel }),
@@ -271,7 +274,7 @@ function syncMonitoring() {
 
 // --- Ciclo de vida ----------------------------------------------------------
 
-const needsInput = (s: InputState) => s.panelOpen || s.monitored.length > 0;
+const needsInput = (s: InputState) => s.panelOpen || s.armed || s.monitored.length > 0;
 
 useInput.subscribe((s, prev) => {
   if (s.deviceId !== prev.deviceId || s.channel !== prev.channel) writePrefs(s.deviceId, s.channel);
@@ -292,12 +295,38 @@ useInput.subscribe((s, prev) => {
 // Al borrar pistas (o abrir otro proyecto) dejar de monitorizar las que ya no existen
 useProject.subscribe((state, prev) => {
   if (state.tracks === prev.tracks) return;
+  const armed = state.tracks.some((t) => t.armed);
+  if (armed !== useInput.getState().armed) useInput.setState({ armed });
   const ids = new Set(state.tracks.map((t) => t.id));
   const { monitored } = useInput.getState();
   const kept = monitored.filter((id) => ids.has(id));
   if (kept.length !== monitored.length) useInput.setState({ monitored: kept });
   else syncMonitoring(); // por si el motor ha recreado algún canal
 });
+
+/** Espera a que la entrada esté abierta (true) o falle (false). */
+export function waitForInput(timeoutMs = 8000): Promise<boolean> {
+  const done = (s: InputState) => s.status === "open" || s.status === "error";
+  const now = useInput.getState();
+  if (done(now)) return Promise.resolve(now.status === "open");
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      unsub();
+      resolve(false);
+    }, timeoutMs);
+    const unsub = useInput.subscribe((s) => {
+      if (!done(s)) return;
+      clearTimeout(timer);
+      unsub();
+      resolve(s.status === "open");
+    });
+  });
+}
+
+/** Nodo con la señal de entrada ya elegida (mono o estéreo), para grabarla. */
+export function inputNode() {
+  return out;
+}
 
 /** Vuelve a intentar abrir la entrada (tras un error). */
 export function retryInput() {

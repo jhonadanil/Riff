@@ -50,7 +50,6 @@ const HISTORY_LIMIT = 100;
 type ProjectState = {
   bpm: number;
   isPlaying: boolean;
-  isRecording: boolean;
   tracks: Track[];
   clips: Clip[];
   selectedTrackId: string | null;
@@ -59,6 +58,8 @@ type ProjectState = {
   pxPerSec: number;
   snap: boolean;
   metronome: boolean;
+  /** Un compás de clics antes de empezar a grabar. */
+  countIn: boolean;
   loop: LoopRegion | null;
   loopEnabled: boolean;
   past: Snapshot[];
@@ -74,10 +75,10 @@ type ProjectState = {
 
   setBpm: (bpm: number) => void;
   setPlaying: (v: boolean) => void;
-  toggleRecording: () => void;
   setZoom: (pxPerSec: number) => void;
   toggleSnap: () => void;
   toggleMetronome: () => void;
+  toggleCountIn: () => void;
   setLoop: (loop: LoopRegion | null) => void;
   toggleLoop: () => void;
 
@@ -141,12 +142,12 @@ let suppressDirty = false;
 export const useProject = create<ProjectState>((set, get) => ({
   ...initial,
   isPlaying: false,
-  isRecording: false,
   selectedTrackId: initial.tracks[0].id,
   selectedClipId: null,
   pxPerSec: 50,
   snap: true,
   metronome: false,
+  countIn: true,
   past: [],
   future: [],
   projectPath: null,
@@ -163,7 +164,6 @@ export const useProject = create<ProjectState>((set, get) => ({
       selectedClipId: null,
       selectedTrackId: data.tracks[0]?.id ?? null,
       isPlaying: false,
-      isRecording: false,
     });
     suppressDirty = false;
   },
@@ -171,10 +171,10 @@ export const useProject = create<ProjectState>((set, get) => ({
 
   setBpm: (bpm) => set({ bpm }),
   setPlaying: (isPlaying) => set({ isPlaying }),
-  toggleRecording: () => set((s) => ({ isRecording: !s.isRecording })),
   setZoom: (pxPerSec) => set({ pxPerSec: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pxPerSec)) }),
   toggleSnap: () => set((s) => ({ snap: !s.snap })),
   toggleMetronome: () => set((s) => ({ metronome: !s.metronome })),
+  toggleCountIn: () => set((s) => ({ countIn: !s.countIn })),
   setLoop: (loop) => set({ loop, loopEnabled: loop !== null }),
   toggleLoop: () => set((s) => ({ loopEnabled: s.loop ? !s.loopEnabled : false })),
 

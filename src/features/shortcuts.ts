@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { useProject } from "@/store/project";
 import * as engine from "@/audio/engine";
+import { toggleRecord, stopRecording, useRecorder } from "@/audio/recorder";
 import { exportWav, newProject, openProject, saveProject, saveProjectAs } from "@/project/projectFile";
 
 export async function togglePlay() {
+  // Grabando (o en la cuenta previa): Espacio para la toma
+  if (useRecorder.getState().phase !== "idle") return stopRecording();
   const { isPlaying, setPlaying } = useProject.getState();
   if (isPlaying) engine.pause();
   else await engine.play();
@@ -12,7 +15,7 @@ export async function togglePlay() {
 
 /**
  * Atajos de teclado globales:
- * Espacio play/pausa · Inicio volver al inicio · S dividir · Supr borrar clip
+ * Espacio play/pausa · R grabar/parar · C cuenta previa · Inicio volver al inicio · S dividir · Supr borrar clip
  * Ctrl+Z deshacer · Ctrl+Y / Ctrl+Shift+Z rehacer · M metrónomo · L loop · G rejilla
  * Ctrl+N nuevo · Ctrl+O abrir · Ctrl+S guardar · Ctrl+Shift+S guardar como · Ctrl+I importar · Ctrl+E exportar
  */
@@ -35,6 +38,8 @@ export function useShortcuts() {
       else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) s.redo();
       else if (ctrl || e.altKey) handled = false;
       else if (e.code === "Space") togglePlay();
+      else if (key === "r" && !e.repeat) toggleRecord();
+      else if (key === "c") s.toggleCountIn();
       else if (e.key === "Home") engine.seek(0);
       else if (key === "s") s.splitAt(engine.position());
       else if ((e.key === "Delete" || e.key === "Backspace") && s.selectedClipId) s.removeClip(s.selectedClipId);

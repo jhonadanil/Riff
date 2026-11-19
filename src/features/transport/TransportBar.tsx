@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Circle, FileAudio, Magnet, Pause, Play, Redo2, Repeat, SkipBack, Timer, Undo2 } from "lucide-react";
+import { Circle, FileAudio, Hourglass, Magnet, Pause, Play, Redo2, Repeat, SkipBack, Timer, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
@@ -8,6 +8,7 @@ import { useProject } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { importAudioFiles } from "@/features/tracks/importAudio";
 import { togglePlay } from "@/features/shortcuts";
+import { countInRemaining, toggleRecord, useRecorder } from "@/audio/recorder";
 import { projectName } from "@/project/projectFile";
 import { cn } from "@/lib/utils";
 import { FileMenu } from "./FileMenu";
@@ -27,6 +28,8 @@ function Tip({ label, children }: { label: string; children: ReactNode }) {
 
 export function TransportBar() {
   const s = useProject();
+  const phase = useRecorder((r) => r.phase);
+  const recording = phase !== "idle";
   const fileInput = useRef<HTMLInputElement>(null);
 
   const onImport = (files: FileList | null) => {
@@ -78,16 +81,22 @@ export function TransportBar() {
               {s.isPlaying ? <Pause className="fill-current" /> : <Play className="translate-x-px fill-current" />}
             </Button>
           </Tip>
-          <Tip label="Grabar (próximamente)">
+          <Tip label={recording ? "Parar la grabación (R)" : "Grabar en las pistas armadas (R)"}>
             <Button
               variant="ghost"
               size="icon"
-              className={cn("hover:bg-raised", s.isRecording && "bg-red-500/12 hover:bg-red-500/20")}
-              onClick={s.toggleRecording}
-              aria-label="Grabar"
-              aria-pressed={s.isRecording}
+              className={cn("hover:bg-raised", recording && "bg-red-500/15 hover:bg-red-500/25")}
+              onClick={() => void toggleRecord()}
+              aria-label={recording ? "Parar la grabación" : "Grabar"}
+              aria-pressed={recording}
             >
-              <Circle className={cn("size-3.5 fill-current", s.isRecording ? "text-red-500" : "text-red-500/80")} />
+              <Circle
+                className={cn(
+                  "size-3.5 fill-current text-red-500",
+                  !recording && "opacity-80",
+                  phase === "countin" && "animate-pulse",
+                )}
+              />
             </Button>
           </Tip>
         </div>
@@ -119,6 +128,11 @@ export function TransportBar() {
           <Tip label="Metrónomo (M)">
             <Toggle className={pillToggle} pressed={s.metronome} onPressedChange={s.toggleMetronome} aria-label="Metrónomo">
               <Timer />
+            </Toggle>
+          </Tip>
+          <Tip label="Cuenta previa de un compás al grabar (C)">
+            <Toggle className={pillToggle} pressed={s.countIn} onPressedChange={s.toggleCountIn} aria-label="Cuenta previa">
+              <Hourglass />
             </Toggle>
           </Tip>
           <Tip label={s.loop ? "Loop (L)" : "Loop (L) · arrastra en la regla para crear la región"}>
@@ -170,6 +184,12 @@ function TimeDisplay() {
   useEffect(() => {
     let raf = 0;
     const tick = () => {
+      const left = countInRemaining();
+      if (left !== null) {
+        if (ref.current) ref.current.textContent = `Cuenta  ·  ${left}`;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       const s = engine.position();
       const beat = (s * bpm) / 60;
       const bar = Math.floor(beat / 4) + 1;
