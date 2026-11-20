@@ -103,7 +103,8 @@ export function TrackList() {
           <Ruler bpm={bpm} pxPerSec={pxPerSec} width={timelineW} timeAt={timeAt} />
         </div>
 
-        {/* Pistas */}
+        {/* Pistas (el cursor y el loop solo cubren esta zona, no el botón de añadir) */}
+        <div className="relative">
         {tracks.map((t) => (
           <div key={t.id} className="flex border-b" style={{ height: TRACK_H }}>
             <TrackHeader track={t} canDelete={tracks.length > 1} />
@@ -143,13 +144,6 @@ export function TrackList() {
           </div>
         ))}
 
-        <div className="sticky left-0 flex w-fit items-center gap-4 px-3 py-2">
-          <Button variant="ghost" size="sm" onClick={addTrack}>
-            <Plus />
-            Añadir pista
-          </Button>
-        </div>
-
         {/* Región de loop sobre las pistas */}
         {loop && (
           <div
@@ -157,11 +151,19 @@ export function TrackList() {
               "pointer-events-none absolute bottom-0 z-[4] border-x",
               loopEnabled ? "border-foreground/35 bg-foreground/[0.045]" : "border-dashed border-foreground/15",
             )}
-            style={{ top: RULER_H, left: HEADER_W + loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
+            style={{ top: 0, left: HEADER_W + loop.start * pxPerSec, width: (loop.end - loop.start) * pxPerSec }}
           />
         )}
 
         <Playhead pxPerSec={pxPerSec} scrollRef={scrollRef} />
+        </div>
+
+        <div className="sticky left-0 flex w-fit items-center gap-4 px-3 py-2">
+          <Button variant="ghost" size="sm" onClick={addTrack}>
+            <Plus />
+            Añadir pista
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -215,7 +217,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           <Button
             size="icon-xs"
             variant={t.muted ? "secondary" : "ghost"}
-            className={cn(t.muted && "text-amber-500")}
+            className={cn(t.muted && "text-warn")}
             onClick={() => updateTrack(t.id, { muted: !t.muted })}
             aria-label="Mute"
             aria-pressed={t.muted}
@@ -225,7 +227,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           <Button
             size="icon-xs"
             variant={t.soloed ? "secondary" : "ghost"}
-            className={cn(t.soloed && "text-sky-500")}
+            className={cn(t.soloed && "text-solo")}
             onClick={() => updateTrack(t.id, { soloed: !t.soloed })}
             aria-label="Solo"
             aria-pressed={t.soloed}
@@ -235,7 +237,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           <Button
             size="icon-xs"
             variant="ghost"
-            className={cn(t.armed && "text-red-500")}
+            className={cn(t.armed && "text-rec")}
             onClick={() => updateTrack(t.id, { armed: !t.armed })}
             aria-label="Armar grabación"
             aria-pressed={t.armed}
@@ -245,7 +247,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           <Button
             size="icon-xs"
             variant={monitoring ? "secondary" : "ghost"}
-            className={cn(monitoring && "text-emerald-500")}
+            className={cn(monitoring && "text-ok")}
             onClick={() => toggleMonitor(t.id)}
             aria-label="Monitorizar entrada"
             title="Monitorizar entrada (escucharte al tocar)"
@@ -380,8 +382,8 @@ function Playhead({ pxPerSec, scrollRef }: { pxPerSec: number; scrollRef: React.
   return (
     <div
       ref={ref}
-      className="pointer-events-none absolute top-0 bottom-0 z-[25] w-px bg-playhead"
-      style={{ left: HEADER_W }}
+      className="pointer-events-none absolute bottom-0 z-[25] w-px bg-playhead"
+      style={{ left: HEADER_W, top: -RULER_H }}
     />
   );
 }

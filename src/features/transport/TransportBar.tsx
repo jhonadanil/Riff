@@ -85,14 +85,14 @@ export function TransportBar() {
             <Button
               variant="ghost"
               size="icon"
-              className={cn("hover:bg-raised", recording && "bg-red-500/15 hover:bg-red-500/25")}
+              className={cn("hover:bg-raised", recording && "bg-rec/15 hover:bg-rec/25")}
               onClick={() => void toggleRecord()}
               aria-label={recording ? "Parar la grabación" : "Grabar"}
               aria-pressed={recording}
             >
               <Circle
                 className={cn(
-                  "size-3.5 fill-current text-red-500",
+                  "size-3.5 fill-current text-rec",
                   !recording && "opacity-80",
                   phase === "countin" && "animate-pulse",
                 )}

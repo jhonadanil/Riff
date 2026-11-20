@@ -33,14 +33,14 @@ export type LoopRegion = { start: number; end: number };
 export const MIN_ZOOM = 10; // px por segundo
 export const MAX_ZOOM = 400;
 export const TRACK_COLORS = [
-  "oklch(0.70 0.18 35)",
-  "oklch(0.72 0.17 60)",
-  "oklch(0.65 0.15 260)",
-  "oklch(0.72 0.14 150)",
-  "oklch(0.75 0.15 320)",
-  "oklch(0.70 0.13 200)",
-  "oklch(0.78 0.15 95)",
-  "oklch(0.66 0.17 0)",
+  "#cba6f7", // mauve
+  "#89b4fa", // blue
+  "#a6e3a1", // green
+  "#fab387", // peach
+  "#f5c2e7", // pink
+  "#94e2d5", // teal
+  "#f9e2af", // yellow
+  "#f38ba8", // red
 ];
 
 /** Lo que se guarda en el historial de deshacer. */

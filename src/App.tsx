@@ -11,7 +11,7 @@ import { useNativeTheme } from "@/features/theme/ThemeMenu";
 
 export default function App() {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
       <Shell />
     </ThemeProvider>
   );

@@ -34,6 +34,15 @@ cpal = { version = "0.18.2", features = ["asio"] }
 [target.'cfg(not(windows))'.dependencies]
 cpal = "0.18.2"
 
+# cpal 0.18.2 (ASIO) suma timestamps que pueden desbordar; en debug eso hace
+# panic dentro del callback de ASIO y mata el proceso. En release simplemente
+# da la vuelta, así que se desactivan los overflow-checks solo para cpal.
+[profile.dev.package.cpal]
+overflow-checks = false
+
+[profile.dev.package.asio-sys]
+overflow-checks = false
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1

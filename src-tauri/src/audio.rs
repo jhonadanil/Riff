@@ -53,6 +53,8 @@ struct Shared {
     peaks: [AtomicF32; 2],
     /// Veces que faltó o sobró audio entre entrada y salida (cortes).
     xruns: AtomicU32,
+    /// Frames que entrega el último callback de entrada (para dimensionar la cola).
+    in_block: AtomicU32,
     /// Latencias medidas por el driver en cada callback (ms).
     input_latency: AtomicF32,
     output_latency: AtomicF32,
@@ -84,6 +86,8 @@ pub struct DeviceInfo {
 #[serde(rename_all = "camelCase")]
 pub struct StartConfig {
     host: String,
+    /// Sistema de audio de la salida; None = el mismo que la entrada.
+    output_host: Option<String>,
     input_device: String,
     output_device: String,
     buffer_size: Option<u32>,
@@ -94,6 +98,7 @@ pub struct StartConfig {
 #[serde(rename_all = "camelCase")]
 pub struct EngineInfo {
     host: String,
+    output_host: String,
     input_name: String,
     output_name: String,
     sample_rate: u32,
@@ -124,8 +129,8 @@ pub struct Meter {
 //   actual (`generation`), suelta lo que haya abierto y termina.
 
 /// ASIO4ALL tarda hasta ~15 s en abrir si otro programa tiene la interfaz.
-const START_TIMEOUT: Duration = Duration::from_secs(20);
-const TIMEOUT: Duration = Duration::from_secs(10);
+const START_TIMEOUT: Duration = Duration::from_secs(45);
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 type Reply<T> = mpsc::Sender<Result<T, String>>;
 
@@ -156,6 +161,7 @@ impl Default for Engine {
             input_channel: AtomicU8::new(0),
             peaks: [AtomicF32::new(0.0), AtomicF32::new(0.0)],
             xruns: AtomicU32::new(0),
+            in_block: AtomicU32::new(0),
             input_latency: AtomicF32::new(0.0),
             output_latency: AtomicF32::new(0.0),
         });
@@ -204,6 +210,21 @@ impl Engine {
                     .into())
             }
         }
+    }
+}
+
+impl Engine {
+    /// Cierra los streams (y con ellos el driver) antes de salir de la app. Si el driver sigue
+    /// abierto al terminar el proceso, ASIO4ALL puede dejarlo colgado sin ventana.
+    pub fn shutdown(&self) {
+        log("cerrando la app: parando el motor…");
+        let _ = self.call(Duration::from_secs(3), Cmd::Stop);
+        // Último recurso: si aun así la salida normal se atasca, terminar a la fuerza
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(3));
+            log("la salida se ha atascado: se termina a la fuerza");
+            std::process::abort();
+        });
     }
 }
 
@@ -312,20 +333,42 @@ fn list_devices(host: &str) -> Result<Vec<DeviceInfo>, String> {
     let host = host_by_name(host)?;
     let default_in = host.default_input_device().and_then(|d| d.id().ok());
     let default_out = host.default_output_device().and_then(|d| d.id().ok());
+    let is_asio = host.id().name().eq_ignore_ascii_case("ASIO");
     let devices = host.devices().map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for d in devices {
         let Ok(id) = d.id() else { continue };
-        let inp = d.default_input_config().ok();
-        let outp = d.default_output_config().ok();
-        let Some(any) = outp.as_ref().or(inp.as_ref()) else { continue };
+        // Pedir la configuración de un driver ASIO lo carga (ASIO4ALL tarda 10-20 s):
+        // aquí solo se lista por nombre y se abre de verdad al arrancar.
+        if is_asio {
+            out.push(DeviceInfo {
+                id: id.to_string(),
+                name: device_name(&d),
+                inputs: 0,
+                outputs: 0,
+                sample_rate: None,
+                buffer_range: None,
+                is_default_input: false,
+                is_default_output: false,
+            });
+            continue;
+        }
+        let inp = d.default_input_config();
+        let outp = d.default_output_config();
+        // Un driver que no deja leer su configuración (p. ej. ASIO4ALL ocupado) se lista
+        // igualmente, para que se vea y el error real salga al intentar arrancarlo.
+        if let (Err(ei), Err(eo)) = (&inp, &outp) {
+            log(format!("  «{}»: sin configuración (entrada: {ei}; salida: {eo})", device_name(&d)));
+        }
+        let (inp, outp) = (inp.ok(), outp.ok());
+        let any = outp.as_ref().or(inp.as_ref());
         out.push(DeviceInfo {
             id: id.to_string(),
             name: device_name(&d),
             inputs: inp.as_ref().map_or(0, |c| c.channels()),
             outputs: outp.as_ref().map_or(0, |c| c.channels()),
-            sample_rate: Some(any.sample_rate()),
-            buffer_range: range(any.buffer_size()),
+            sample_rate: any.map(|c| c.sample_rate()),
+            buffer_range: any.and_then(|c| range(c.buffer_size())),
             is_default_input: default_in.as_ref() == Some(&id),
             is_default_output: default_out.as_ref() == Some(&id),
         });
@@ -334,40 +377,61 @@ fn list_devices(host: &str) -> Result<Vec<DeviceInfo>, String> {
 }
 
 fn start(shared: &Arc<Shared>, config: &StartConfig) -> Result<(Running, EngineInfo), String> {
-    let host = host_by_name(&config.host)?;
-    let input = find_device(&host, &config.input_device)?;
-    let output = find_device(&host, &config.output_device)?;
+    let in_host = host_by_name(&config.host)?;
+    let out_host = match config.output_host.as_deref() {
+        Some(h) if !h.eq_ignore_ascii_case(&config.host) => host_by_name(h)?,
+        _ => host_by_name(&config.host)?,
+    };
+    let input = find_device(&in_host, &config.input_device)?;
+    let output = find_device(&out_host, &config.output_device)?;
     let in_cfg = input.default_input_config().map_err(|e| format!("Entrada: {e}"))?;
     let out_cfg = output.default_output_config().map_err(|e| format!("Salida: {e}"))?;
     log(format!("  entrada «{}» {in_cfg:?}", device_name(&input)));
     log(format!("  salida «{}» {out_cfg:?}", device_name(&output)));
 
-    let sample_rate = out_cfg.sample_rate();
-    let buffer_size = config.buffer_size.map_or(BufferSize::Default, BufferSize::Fixed);
-    let in_stream_cfg = StreamConfig { channels: in_cfg.channels(), sample_rate, buffer_size };
-    let out_stream_cfg = StreamConfig { channels: out_cfg.channels(), sample_rate, buffer_size };
+    // Entrada y salida van por relojes distintos si son dispositivos o sistemas distintos
+    // (p. ej. interfaz por ASIO y parlantes por WASAPI): hay que remuestrear y corregir la deriva.
+    let in_rate = in_cfg.sample_rate();
+    let out_rate = out_cfg.sample_rate();
+    let cross = in_host.id() != out_host.id() || config.input_device != config.output_device || in_rate != out_rate;
+
+    let requested = config.buffer_size.map_or(BufferSize::Default, BufferSize::Fixed);
+    let in_stream_cfg = StreamConfig { channels: in_cfg.channels(), sample_rate: in_rate, buffer_size: requested };
+    // La salida usa el búfer pedido solo si su driver lo admite; si no, el suyo
+    let out_buffer = match (config.buffer_size, range(out_cfg.buffer_size())) {
+        (Some(n), Some((lo, hi))) if n >= lo && n <= hi => BufferSize::Fixed(n),
+        (Some(_), Some(_)) => BufferSize::Default,
+        (Some(n), None) if !cross => BufferSize::Fixed(n),
+        _ => BufferSize::Default,
+    };
+    let out_stream_cfg = StreamConfig { channels: out_cfg.channels(), sample_rate: out_rate, buffer_size: out_buffer };
 
     shared.input_channel.store(config.input_channel.min(STEREO), Ordering::Relaxed);
     shared.xruns.store(0, Ordering::Relaxed);
+    shared.in_block.store(0, Ordering::Relaxed);
 
     // Cola de ~100 ms en frames estéreo; en la práctica solo lleva un búfer o dos
-    let capacity = (sample_rate as usize / 10).max(4096) * 2;
+    let capacity = (in_rate as usize / 10).max(4096) * 2;
     let (producer, consumer) = RingBuffer::<f32>::new(capacity);
+    let ratio = in_rate as f64 / out_rate as f64;
 
+    // Primero la salida: abrir la entrada antes hace que ASIO pida un reinicio del driver
+    let output_stream =
+        build_output(&output, &out_stream_cfg, out_cfg.sample_format(), shared.clone(), consumer, cross.then_some(ratio))?;
+    log("  salida creada");
     let input_stream = build_input(&input, &in_stream_cfg, in_cfg.sample_format(), shared.clone(), producer)?;
     log("  entrada creada");
-    let output_stream = build_output(&output, &out_stream_cfg, out_cfg.sample_format(), shared.clone(), consumer)?;
-    log("  salida creada");
     input_stream.play().map_err(|e| format!("No se pudo arrancar la entrada: {e}"))?;
     log("  entrada sonando");
     output_stream.play().map_err(|e| format!("No se pudo arrancar la salida: {e}"))?;
     log("  salida sonando");
 
     let info = EngineInfo {
-        host: host.id().name().to_string(),
+        host: in_host.id().name().to_string(),
+        output_host: out_host.id().name().to_string(),
         input_name: device_name(&input),
         output_name: device_name(&output),
-        sample_rate,
+        sample_rate: out_rate,
         buffer_size: output_stream.buffer_size().ok(),
         input_channels: in_cfg.channels(),
         output_channels: out_cfg.channels(),
@@ -468,6 +532,7 @@ where
             move |data: &[T], info: &cpal::InputCallbackInfo| {
                 let ts = info.timestamp();
                 shared.input_latency.store(ms(ts.callback.duration_since(ts.capture)));
+                shared.in_block.store((data.len() / channels) as u32, Ordering::Relaxed);
                 let sel = shared.input_channel.load(Ordering::Relaxed);
                 let mut p = [0f32; 2];
                 for frame in data.chunks_exact(channels) {
@@ -501,10 +566,11 @@ fn build_output(
     format: SampleFormat,
     shared: Arc<Shared>,
     consumer: rtrb::Consumer<f32>,
+    resample: Option<f64>,
 ) -> Result<Stream, String> {
     macro_rules! build {
         ($t:ty) => {
-            output_stream::<$t>(device, config, shared, consumer)
+            output_stream::<$t>(device, config, shared, consumer, resample)
         };
     }
     match format {
@@ -517,11 +583,39 @@ fn build_output(
     }
 }
 
-fn output_stream<T>(device: &Device, config: &StreamConfig, shared: Arc<Shared>, mut consumer: rtrb::Consumer<f32>) -> Result<Stream, String>
+/// Estado del remuestreador lineal con corrección de deriva (solo si entrada y salida
+/// no comparten reloj): lleva la cola de la entrada hacia un nivel objetivo ajustando
+/// un poco la velocidad de lectura.
+struct Resampler {
+    ratio: f64,
+    frac: f64,
+    prev: (f32, f32),
+    next: (f32, f32),
+    avg: f32,
+}
+
+fn pop_frame(c: &mut rtrb::Consumer<f32>, starved: &mut bool) -> (f32, f32) {
+    match (c.pop(), c.pop()) {
+        (Ok(l), Ok(r)) => (l, r),
+        _ => {
+            *starved = true;
+            (0.0, 0.0)
+        }
+    }
+}
+
+fn output_stream<T>(
+    device: &Device,
+    config: &StreamConfig,
+    shared: Arc<Shared>,
+    mut consumer: rtrb::Consumer<f32>,
+    resample: Option<f64>,
+) -> Result<Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
+    let mut rs = resample.map(|ratio| Resampler { ratio, frac: 1.0, prev: (0.0, 0.0), next: (0.0, 0.0), avg: 0.0 });
     device
         .build_output_stream::<T, _, _>(
             config.clone(),
@@ -529,28 +623,52 @@ where
                 let ts = info.timestamp();
                 shared.output_latency.store(ms(ts.playback.duration_since(ts.callback)));
                 let frames = data.len() / channels;
-
-                // Si entrada y salida se desfasan (relojes distintos) y se acumula audio,
-                // tirar lo sobrante: la latencia nunca crece más de un búfer
-                let queued = consumer.slots() / 2;
-                if queued > frames * 2 {
-                    let drop = (queued - frames) * 2;
-                    if let Ok(chunk) = consumer.read_chunk(drop) {
-                        chunk.commit_all();
-                    }
-                    shared.xruns.fetch_add(1, Ordering::Relaxed);
-                }
-
                 let monitor = shared.monitor.load(Ordering::Relaxed);
                 let gain = shared.gain.load();
                 let mut starved = false;
-                for frame in data.chunks_exact_mut(channels) {
-                    let (l, r) = match (consumer.pop(), consumer.pop()) {
-                        (Ok(l), Ok(r)) => (l, r),
-                        _ => {
-                            starved = true;
-                            (0.0, 0.0)
+
+                let mut step = 1.0;
+                if let Some(rs) = rs.as_mut() {
+                    // Nivel objetivo de la cola (frames de entrada): un bloque de entrada y uno de salida
+                    let queued = (consumer.slots() / 2) as f32;
+                    let target = shared.in_block.load(Ordering::Relaxed) as f32 + frames as f32 * rs.ratio as f32;
+                    rs.avg += (queued - rs.avg) * 0.05;
+                    // Muy por encima del objetivo: tirar lo sobrante en vez de acumular retraso
+                    if queued > target * 4.0 + 512.0 {
+                        let drop = (((queued - target) as usize) * 2).min(consumer.slots() & !1);
+                        if let Ok(chunk) = consumer.read_chunk(drop) {
+                            chunk.commit_all();
                         }
+                        rs.avg = target;
+                        shared.xruns.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let adj = (((rs.avg - target) as f64) * 1e-5).clamp(-0.005, 0.005);
+                    step = rs.ratio * (1.0 + adj);
+                } else {
+                    // Mismo reloj: si se acumula audio, tirar lo sobrante (la latencia no crece de un búfer)
+                    let queued = consumer.slots() / 2;
+                    if queued > frames * 2 {
+                        let drop = (queued - frames) * 2;
+                        if let Ok(chunk) = consumer.read_chunk(drop) {
+                            chunk.commit_all();
+                        }
+                        shared.xruns.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+
+                for frame in data.chunks_exact_mut(channels) {
+                    let (l, r) = match rs.as_mut() {
+                        Some(rs) => {
+                            while rs.frac >= 1.0 {
+                                rs.prev = rs.next;
+                                rs.next = pop_frame(&mut consumer, &mut starved);
+                                rs.frac -= 1.0;
+                            }
+                            let t = rs.frac as f32;
+                            rs.frac += step;
+                            (rs.prev.0 + (rs.next.0 - rs.prev.0) * t, rs.prev.1 + (rs.next.1 - rs.prev.1) * t)
+                        }
+                        None => pop_frame(&mut consumer, &mut starved),
                     };
                     let (l, r) = if monitor { (l * gain, r * gain) } else { (0.0, 0.0) };
                     frame[0] = T::from_sample(l);

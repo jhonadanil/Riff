@@ -28,7 +28,7 @@ export function Mixer() {
             <Button
               size="icon-xs"
               variant={t.muted ? "secondary" : "ghost"}
-              className={cn(t.muted && "text-amber-500")}
+              className={cn(t.muted && "text-warn")}
               onClick={() => updateTrack(t.id, { muted: !t.muted })}
               aria-label={`Mute ${t.name}`}
               aria-pressed={t.muted}
@@ -38,7 +38,7 @@ export function Mixer() {
             <Button
               size="icon-xs"
               variant={t.soloed ? "secondary" : "ghost"}
-              className={cn(t.soloed && "text-sky-500")}
+              className={cn(t.soloed && "text-solo")}
               onClick={() => updateTrack(t.id, { soloed: !t.soloed })}
               aria-label={`Solo ${t.name}`}
               aria-pressed={t.soloed}

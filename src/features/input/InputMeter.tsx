@@ -64,7 +64,7 @@ export function InputMeter({
         <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Nivel de entrada">
           <div
             ref={rmsRef}
-            className="absolute inset-0 bg-linear-to-r from-emerald-500 from-70% via-amber-400 via-88% to-red-500"
+            className="absolute inset-0 bg-linear-to-r from-ok from-70% via-warn via-88% to-rec"
             style={{ clipPath: "inset(0 100% 0 0)" }}
           />
           <div ref={peakRef} className="absolute inset-y-0 w-0.5 bg-foreground/70" style={{ opacity: 0 }} />
@@ -72,7 +72,7 @@ export function InputMeter({
         <div
           ref={clipRef}
           data-on="false"
-          className="size-2 shrink-0 rounded-full bg-muted transition-colors data-[on=true]:bg-red-500"
+          className="size-2 shrink-0 rounded-full bg-muted transition-colors data-[on=true]:bg-rec"
           title="Saturación"
         />
       </div>
