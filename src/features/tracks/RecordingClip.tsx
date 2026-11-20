@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { position } from "@/audio/engine";
 import { LIVE_PEAKS_PER_SEC, livePeaks, useRecorder } from "@/audio/recorder";
 
-const REC_COLOR = "oklch(0.63 0.22 25)";
+const REC_COLOR = "var(--rec)";
 
 /** La toma que se está grabando en esta pista: crece con el cursor y dibuja la onda en vivo. */
 export function RecordingClip({ trackId, pxPerSec }: { trackId: string; pxPerSec: number }) {

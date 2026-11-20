@@ -23,6 +23,7 @@ export type NativeDevice = {
 };
 export type NativeInfo = {
   host: string;
+  outputHost: string;
   inputName: string;
   outputName: string;
   sampleRate: number;
@@ -38,7 +39,11 @@ type NativeState = {
   enabled: boolean;
   hosts: NativeHost[];
   host: string | null;
+  /** Sistema de audio de la salida; null = el mismo que la entrada. */
+  outputHost: string | null;
   devices: NativeDevice[];
+  /** Dispositivos del sistema de la salida (los mismos que `devices` si es el mismo sistema). */
+  outputDevices: NativeDevice[];
   inputId: string | null;
   outputId: string | null;
   /** null = el que diga el driver. */
@@ -49,13 +54,14 @@ type NativeState = {
 
   setEnabled: (on: boolean) => void;
   setHost: (host: string) => void;
+  setOutputHost: (host: string) => void;
   setInput: (id: string) => void;
   setOutput: (id: string) => void;
   setBufferSize: (frames: number | null) => void;
 };
 
 const PREFS_KEY = "riff.nativeAudio";
-type Prefs = Pick<NativeState, "enabled" | "host" | "inputId" | "outputId" | "bufferSize">;
+type Prefs = Pick<NativeState, "enabled" | "host" | "outputHost" | "inputId" | "outputId" | "bufferSize">;
 
 function readPrefs(): Prefs {
   try {
@@ -63,12 +69,13 @@ function readPrefs(): Prefs {
     return {
       enabled: v.enabled === true,
       host: typeof v.host === "string" ? v.host : null,
+      outputHost: typeof v.outputHost === "string" ? v.outputHost : null,
       inputId: typeof v.inputId === "string" ? v.inputId : null,
       outputId: typeof v.outputId === "string" ? v.outputId : null,
       bufferSize: typeof v.bufferSize === "number" ? v.bufferSize : null,
     };
   } catch {
-    return { enabled: false, host: null, inputId: null, outputId: null, bufferSize: null };
+    return { enabled: false, host: null, outputHost: null, inputId: null, outputId: null, bufferSize: null };
   }
 }
 
@@ -77,13 +84,15 @@ export const useNative = create<NativeState>((set) => ({
   available: isTauri(),
   hosts: [],
   devices: [],
+  outputDevices: [],
   status: "off",
   error: null,
   info: null,
 
   setEnabled: (enabled) => set({ enabled }),
   // Al cambiar de sistema de audio los dispositivos son otros
-  setHost: (host) => set({ host, inputId: null, outputId: null, devices: [] }),
+  setHost: (host) => set({ host, inputId: null, outputId: null, devices: [], outputDevices: [] }),
+  setOutputHost: (outputHost) => set({ outputHost, outputId: null, outputDevices: [] }),
   setInput: (inputId) => set({ inputId }),
   setOutput: (outputId) => set({ outputId }),
   setBufferSize: (bufferSize) => set({ bufferSize }),
@@ -104,15 +113,23 @@ export async function refreshNativeDevices() {
     if (!host) return;
     const devices = await invoke<NativeDevice[]>("audio_devices", { host });
     const cur = useNative.getState();
-    const pick = (id: string | null, ok: (d: NativeDevice) => boolean, isDefault: (d: NativeDevice) => boolean) =>
-      id && devices.some((d) => d.id === id && ok(d)) ? id : (devices.find((d) => ok(d) && isDefault(d)) ?? devices.find(ok))?.id ?? null;
-    const inputId = pick(cur.inputId, (d) => d.inputs > 0, (d) => d.isDefaultInput);
-    // Con ASIO entrada y salida son el mismo driver
+    const outHost = cur.outputHost && hosts.some((h) => h.id === cur.outputHost) ? cur.outputHost : host;
+    const outputDevices = outHost === host ? devices : await invoke<NativeDevice[]>("audio_devices", { host: outHost });
+    const pick = (list: NativeDevice[], id: string | null, ok: (d: NativeDevice) => boolean, isDefault: (d: NativeDevice) => boolean) =>
+      id && list.some((d) => d.id === id && ok(d)) ? id : (list.find((d) => ok(d) && isDefault(d)) ?? list.find(ok))?.id ?? null;
+    const inputId = pick(devices, cur.inputId, (d) => host === "ASIO" || d.inputs > 0, (d) => d.isDefaultInput);
+    // Con ASIO en los dos lados, entrada y salida son el mismo driver (solo se puede abrir uno)
     const outputId =
-      host === "ASIO" && inputId
+      host === "ASIO" && outHost === "ASIO" && inputId
         ? inputId
-        : pick(cur.outputId, (d) => d.outputs > 0, (d) => d.isDefaultOutput);
-    useNative.setState({ devices, inputId, outputId });
+        : pick(outputDevices, cur.outputId, (d) => outHost === "ASIO" || d.outputs > 0, (d) => d.isDefaultOutput);
+    useNative.setState({ devices, outputDevices, outputHost: outHost === host ? null : outHost, inputId, outputId });
+    if (devices.length === 0) {
+      useNative.setState({
+        status: "error",
+        error: `El sistema ${host} no ha devuelto ningún dispositivo. Si es ASIO: ¿está instalado el driver (ASIO4ALL o el de tu interfaz) y la interfaz conectada?`,
+      });
+    }
   } catch (err) {
     useNative.setState({ status: "error", error: String(err) });
   }
@@ -134,6 +151,7 @@ async function start() {
     const info = await invoke<NativeInfo>("audio_start", {
       config: {
         host: s.host,
+        outputHost: s.outputHost,
         inputDevice: s.inputId,
         outputDevice: s.outputId,
         bufferSize: s.bufferSize,
@@ -169,24 +187,26 @@ export async function nativeMeter() {
   return invoke<NativeMeter>("audio_meter");
 }
 
-export function restartNative() {
-  if (useNative.getState().enabled) void start();
+export async function restartNative() {
+  if (!useNative.getState().enabled) return;
+  await refreshNativeDevices();
+  void start();
 }
 
 // --- Ciclo de vida ---------------------------------------------------------------------
 
 useNative.subscribe((s, prev) => {
-  if (s.enabled !== prev.enabled || s.host !== prev.host || s.inputId !== prev.inputId || s.outputId !== prev.outputId || s.bufferSize !== prev.bufferSize) {
+  if (s.enabled !== prev.enabled || s.host !== prev.host || s.outputHost !== prev.outputHost || s.inputId !== prev.inputId || s.outputId !== prev.outputId || s.bufferSize !== prev.bufferSize) {
     try {
-      const prefs: Prefs = { enabled: s.enabled, host: s.host, inputId: s.inputId, outputId: s.outputId, bufferSize: s.bufferSize };
+      const prefs: Prefs = { enabled: s.enabled, host: s.host, outputHost: s.outputHost, inputId: s.inputId, outputId: s.outputId, bufferSize: s.bufferSize };
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // sin almacenamiento
     }
   }
-  if (s.host !== prev.host && s.host) void refreshNativeDevices();
+  if ((s.host !== prev.host && s.host) || s.outputHost !== prev.outputHost) void refreshNativeDevices();
 
-  const config = s.inputId !== prev.inputId || s.outputId !== prev.outputId || s.bufferSize !== prev.bufferSize || s.host !== prev.host;
+  const config = s.outputHost !== prev.outputHost || s.inputId !== prev.inputId || s.outputId !== prev.outputId || s.bufferSize !== prev.bufferSize || s.host !== prev.host;
   if (!s.enabled && prev.enabled) void stop();
   else if (s.enabled && (!prev.enabled || config) && s.inputId && s.outputId) void start();
 });

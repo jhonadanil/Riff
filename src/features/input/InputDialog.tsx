@@ -123,7 +123,7 @@ function InputSettings() {
                     : "Ajusta la ganancia en la interfaz para que los golpes fuertes no lleguen al rojo."}
               </p>
               {status === "open" && mono && (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+                <p className="rounded-md border border-warn/40 bg-warn/5 p-3 text-xs">
                   Prueba a elegir arriba la interfaz por su nombre en vez de «Predeterminado». Si sigue igual: Configuración
                   de sonido de Windows › Más opciones de sonido › Grabar › tu interfaz › Propiedades › Opciones avanzadas,
                   y elige un formato de <b>2 canales</b>. Algunas interfaces muestran cada entrada como un dispositivo

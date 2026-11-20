@@ -17,6 +17,12 @@ pub fn run() {
             audio::audio_set_input_channel,
             audio::audio_meter,
         ])
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if let tauri::WindowEvent::Destroyed = event {
+                window.state::<audio::Engine>().shutdown();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
