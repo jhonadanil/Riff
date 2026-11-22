@@ -1,6 +1,7 @@
 import { message, open, save } from "@tauri-apps/plugin-dialog";
 import { exists, mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { dirname, join } from "@tauri-apps/api/path";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import * as engine from "@/audio/engine";
 import { emptyProject, useProject, type ProjectData } from "@/store/project";
@@ -20,7 +21,29 @@ type RiffFile = ProjectData & {
   version: number;
   /** bufferId -> nombre de archivo dentro de Audio/ */
   audio: Record<string, string>;
+  /** Plugins VST3 de cada pista (id de pista -> cadena con su estado). */
+  plugins?: Record<string, unknown[]>;
 };
+
+/** Cadenas de plugins de todas las pistas, con su estado, para guardarlas. */
+async function snapshotPlugins(): Promise<Record<string, unknown[]>> {
+  if (!isTauri()) return {};
+  // Los plugins de pistas que ya no existen se descargan ahora (hasta aquí se podían recuperar con deshacer).
+  // Si algo falla, se deja que el guardado falle: guardar sin plugins borraría los que había.
+  await invoke("plugin_prune", { keep: useProject.getState().tracks.map((t) => t.id) });
+  return invoke<Record<string, unknown[]>>("plugin_snapshot");
+}
+
+/** Carga las cadenas de un proyecto (sustituye a las que hubiera). */
+async function restorePlugins(chains: Record<string, unknown[]>) {
+  if (!isTauri()) return;
+  try {
+    const failed = await invoke<string[]>("plugin_restore", { chains });
+    if (failed.length) toast.warning(`No se pudieron cargar ${failed.length} plugin(s)`, { description: failed.join("\n") });
+  } catch (err) {
+    console.error(err);
+  }
+}
 
 export const projectName = (path: string | null) =>
   path ? path.split(/[\\/]/).pop()!.replace(/\.riff$/i, "") : "Sin título";
@@ -50,6 +73,7 @@ export async function newProject() {
   if (!(await confirmDiscard())) return;
   stopPlayback();
   useProject.getState().loadProject(emptyProject(), null);
+  await restorePlugins({});
 }
 
 export async function openProject(path?: string) {
@@ -78,12 +102,22 @@ export async function openProject(path?: string) {
       }
     }
 
-    const clips = file.clips.filter((c) => engine.hasBuffer(c.bufferId));
+    const clips = file.clips.filter((c) => c.midi || engine.hasBuffer(c.bufferId));
     stopPlayback();
     useProject.getState().loadProject(
-      { bpm: file.bpm, tracks: file.tracks, clips, loop: file.loop, loopEnabled: file.loopEnabled },
+      {
+        bpm: file.bpm,
+        timeSig: file.timeSig ?? [4, 4],
+        tracks: file.tracks,
+        clips,
+        buses: file.buses ?? [],
+        master: file.master ?? 1,
+        loop: file.loop,
+        loopEnabled: file.loopEnabled,
+      },
       chosen,
     );
+    await restorePlugins(file.plugins ?? {});
     addRecent(chosen);
     if (missing.length) {
       toast.warning(`Faltan ${missing.length} audio(s)`, {
@@ -137,11 +171,15 @@ async function writeProject(path: string, quiet = false): Promise<boolean> {
       format: "riff",
       version: FORMAT_VERSION,
       bpm: s.bpm,
+      timeSig: s.timeSig,
       tracks: s.tracks,
       clips: s.clips,
+      buses: s.buses,
+      master: s.master,
       loop: s.loop,
       loopEnabled: s.loopEnabled,
       audio,
+      plugins: await snapshotPlugins(),
     };
     await writeTextFile(path, JSON.stringify(file, null, 2));
     useProject.getState().markSaved(path);

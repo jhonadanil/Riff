@@ -1,0 +1,39 @@
+# Genera el instalador de Windows y lo sube a una release de GitHub.
+# Uso: crea una etiqueta (git tag v0.1.0 && git push --tags) o lánzalo a mano desde la pestaña Actions.
+# La landing busca el .exe de «la última release» para el botón de descarga.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Riff ${{ github.ref_name }}
+          releaseBody: Instalador para Windows 10 y 11 de 64 bits.
+          releaseDraft: false
+          prerelease: false

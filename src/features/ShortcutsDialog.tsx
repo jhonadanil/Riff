@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
-import { Keyboard } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Lista de atajos que se muestra en el diálogo (mantener al día con useShortcuts). */
 const GROUPS: { title: string; items: [keys: string[], label: string][] }[] = [
@@ -21,8 +18,12 @@ const GROUPS: { title: string; items: [keys: string[], label: string][] }[] = [
     title: "Edición",
     items: [
       [["S"], "Dividir el clip en el cursor"],
-      [["Supr"], "Borrar el clip seleccionado"],
-      [["Esc"], "Quitar la selección"],
+      [["Supr"], "Borrar los clips seleccionados"],
+      [["Esc"], "Quitar la selección (o cerrar el piano roll)"],
+      [["Ctrl", "C"], "Copiar los clips seleccionados"],
+      [["Ctrl", "V"], "Pegar en el cursor, en la pista seleccionada"],
+      [["Ctrl", "D"], "Duplicar justo a continuación"],
+      [["Ctrl", "A"], "Seleccionar todos los clips"],
       [["G"], "Ajustar a la rejilla"],
       [["Ctrl", "Z"], "Deshacer"],
       [["Ctrl", "Y"], "Rehacer"],
@@ -45,6 +46,8 @@ const GROUPS: { title: string; items: [keys: string[], label: string][] }[] = [
       [["Ctrl", "Rueda"], "Zoom horizontal"],
       [["Arrastrar en la regla"], "Crear región de loop"],
       [["Doble clic en el loop"], "Quitar loop"],
+      [["Mayús", "clic"], "Añadir un clip a la selección"],
+      [["Doble clic en un clip MIDI"], "Abrir el piano roll"],
     ],
   },
   {
@@ -61,34 +64,11 @@ function Kbd({ children }: { children: string }) {
   );
 }
 
-/** Botón con icono de teclado que abre la lista de atajos (también con la tecla «?»). */
-export function ShortcutsButton() {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
+/** Lista de atajos. La abre el menú de ajustes (o la tecla «?», ver `useShortcutsKey`). */
+export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Atajos de teclado">
-            <Keyboard />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Atajos de teclado (?)</TooltipContent>
-      </Tooltip>
-
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Atajos de teclado</DialogTitle>
@@ -117,4 +97,19 @@ export function ShortcutsButton() {
       </Dialog>
     </>
   );
+}
+
+/** La tecla «?» abre y cierra la lista de atajos. */
+export function useShortcutsKey(toggle: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle]);
 }

@@ -1,30 +1,46 @@
 import { useEffect, useRef, useState } from "react";
-import { Headphones, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
+import { ClipboardPaste, Headphones, Music2, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuCheckboxItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { gridSeconds, snapTime, useProject, type Track } from "@/store/project";
+import { barSeconds, gridSeconds, hasClipboard, snapTime, useProject, type AutoParam, type Track } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { useInput } from "@/audio/input";
+import { subscribeLevels } from "@/audio/levels";
 import { cn } from "@/lib/utils";
 import { ClipView, TRACK_H } from "./ClipView";
 import { RecordingClip, useRecordingEnd } from "./RecordingClip";
 import { importAudioFiles } from "./importAudio";
+import { useTrackKind } from "@/audio/chains";
+import { TrackInputMenu } from "./TrackInput";
+import { TrackMidiMenu } from "./TrackMidi";
+import { TrackPluginsButton } from "./TrackPlugins";
+import { AutomationLane, showAutomation, useAutomationUi } from "./AutomationLane";
 
-const HEADER_W = 248; // ancho de la cabecera de pista
+const HEADER_W = 280; // ancho de la cabecera de pista
 const RULER_H = 28;
 const MIN_LENGTH_SEC = engine.EMPTY_SONG_SEC; // la línea de tiempo nunca es más corta que esto
 const TAIL_SEC = 30; // espacio libre tras el último clip
 
 export function TrackList() {
-  const { tracks, clips, bpm, pxPerSec, loop, loopEnabled, selectTrack, setZoom, addTrack } = useProject();
+  const { tracks, clips, bpm, pxPerSec, loop, loopEnabled, selectTrack, setZoom, addTrack, selectedTrackId: selectedId } = useProject();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dropTrackId, setDropTrackId] = useState<string | null>(null);
+  const shownAutomation = useAutomationUi((s) => s.shown);
+  /** Dónde se hizo clic derecho en la línea de tiempo (para pegar o crear un clip ahí). */
+  const menuTime = useRef(0);
 
   const recordingEnd = useRecordingEnd();
   const lastEnd = clips.reduce((m, c) => Math.max(m, c.start + c.duration), recordingEnd);
@@ -109,9 +125,13 @@ export function TrackList() {
           <div key={t.id} className="flex border-b" style={{ height: TRACK_H }}>
             <TrackHeader track={t} canDelete={tracks.length > 1} />
 
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
             <div
+              onContextMenuCapture={(e) => (menuTime.current = snapTime(timeAt(e.clientX)))}
               className={cn(
                 "relative flex-1 bg-lane transition-colors",
+                selectedId === t.id && "bg-lane-selected",
                 dropTrackId === t.id && "bg-foreground/5 outline-2 -outline-offset-4 outline-foreground/30 outline-dashed",
               )}
               onClick={(e) => {
@@ -140,7 +160,11 @@ export function TrackList() {
                   <ClipView key={c.id} clip={c} color={t.color} pxPerSec={pxPerSec} />
                 ))}
               <RecordingClip trackId={t.id} pxPerSec={pxPerSec} />
+              {shownAutomation[t.id] && <AutomationLane track={t} param={shownAutomation[t.id]!} pxPerSec={pxPerSec} />}
             </div>
+              </ContextMenuTrigger>
+              <LaneMenu track={t} timeRef={menuTime} />
+            </ContextMenu>
           </div>
         ))}
 
@@ -169,12 +193,77 @@ export function TrackList() {
   );
 }
 
+/** Menú del área de una pista: pegar y crear clips MIDI donde se hizo clic. */
+function LaneMenu({ track, timeRef }: { track: Track; timeRef: React.RefObject<number> }) {
+  const kind = useTrackKind(track.id);
+  const bpm = useProject((s) => s.bpm);
+  const timeSig = useProject((s) => s.timeSig);
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem
+        disabled={!hasClipboard()}
+        onSelect={() => useProject.getState().paste(timeRef.current, track.id)}
+      >
+        <ClipboardPaste />
+        Pegar aquí
+        <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+      </ContextMenuItem>
+      {kind === "midi" && (
+        <ContextMenuItem
+          onSelect={() => {
+            const s = useProject.getState();
+            const id = s.addMidiClip(track.id, timeRef.current, barSeconds(bpm, timeSig) * 2);
+            s.openPianoRoll(id);
+          }}
+        >
+          <Music2 />
+          Crear clip MIDI aquí (2 compases)
+        </ContextMenuItem>
+      )}
+    </ContextMenuContent>
+  );
+}
+
+/** Nivel de la entrada de esta pista: sirve para ver de un vistazo que cada una recibe lo que toca. */
+function TrackMeter({ track }: { track: Track }) {
+  const bar = useRef<HTMLDivElement>(null);
+  const channel = useInput((s) => s.channel);
+  const sel = track.input ?? channel;
+  const selRef = useRef(sel);
+  selRef.current = sel;
+
+  useEffect(() => {
+    let shown = 0;
+    return subscribeLevels(({ peaks }) => {
+      const el = bar.current;
+      if (!el) return;
+      const p = selRef.current === "1" ? peaks[0] : selRef.current === "2" ? peaks[1] : Math.max(peaks[0], peaks[1]);
+      // Cae poco a poco para que los golpes se vean
+      shown = Math.max(p, shown * 0.8);
+      el.style.width = `${Math.min(100, Math.sqrt(shown) * 100)}%`;
+      el.style.background = shown > 0.9 ? "var(--rec)" : shown > 0.5 ? "var(--warn)" : "var(--ok)";
+    });
+  }, []);
+
+  return (
+    <div
+      className="pointer-events-none absolute right-2 bottom-1 left-3 h-1 overflow-hidden rounded-full bg-muted"
+      role="meter"
+      aria-label={`Nivel de entrada de ${track.name}`}
+    >
+      <div ref={bar} className="h-full w-0 rounded-full" />
+    </div>
+  );
+}
+
 function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean }) {
   const selected = useProject((s) => s.selectedTrackId === t.id);
   const { updateTrack, selectTrack, removeTrack } = useProject();
+  const kind = useTrackKind(t.id);
   const monitoring = useInput((s) => s.monitored.includes(t.id));
   const toggleMonitor = useInput((s) => s.toggleMonitor);
   const [editing, setEditing] = useState(false);
+  const shown = useAutomationUi((s) => s.shown[t.id]);
 
   const rename = (name: string) => {
     setEditing(false);
@@ -196,7 +285,7 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           style={{ width: HEADER_W }}
           onClick={() => selectTrack(t.id)}
         >
-          <span className="mr-1 h-10 w-1 shrink-0 rounded-full" style={{ background: t.color }} />
+          <span className={cn("mr-1 h-10 shrink-0 rounded-full transition-[width]", selected ? "w-1.5" : "w-1")} style={{ background: t.color }} />
           {editing ? (
             <input
               autoFocus
@@ -210,10 +299,13 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
               aria-label="Nombre de la pista"
             />
           ) : (
-            <span className="flex-1 truncate text-sm font-medium" onDoubleClick={() => setEditing(true)} title="Doble clic para renombrar">
+            <span
+              className={cn("flex-1 truncate text-sm", selected ? "font-semibold" : "font-medium text-foreground/70")}
+              onDoubleClick={() => setEditing(true)} title="Doble clic para renombrar">
               {t.name}
             </span>
           )}
+          {kind === "midi" ? <TrackMidiMenu track={t} /> : <TrackInputMenu track={t} />}
           <Button
             size="icon-xs"
             variant={t.muted ? "secondary" : "ghost"}
@@ -240,21 +332,26 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
             className={cn(t.armed && "text-rec")}
             onClick={() => updateTrack(t.id, { armed: !t.armed })}
             aria-label="Armar grabación"
+            title="Armar la pista para grabar en ella"
             aria-pressed={t.armed}
           >
             R
           </Button>
-          <Button
-            size="icon-xs"
-            variant={monitoring ? "secondary" : "ghost"}
-            className={cn(monitoring && "text-ok")}
-            onClick={() => toggleMonitor(t.id)}
-            aria-label="Monitorizar entrada"
-            title="Monitorizar entrada (escucharte al tocar)"
-            aria-pressed={monitoring}
-          >
-            <Headphones />
-          </Button>
+          {kind === "audio" && (
+            <Button
+              size="icon-xs"
+              variant={monitoring ? "secondary" : "ghost"}
+              className={cn(monitoring && "text-ok")}
+              onClick={() => toggleMonitor(t.id)}
+              aria-label="Monitorizar entrada"
+              title="Escucharte al tocar (con los plugins de esta pista)"
+              aria-pressed={monitoring}
+            >
+              <Headphones />
+            </Button>
+          )}
+          <TrackPluginsButton track={t} />
+          {kind === "audio" && <TrackMeter track={t} />}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -262,6 +359,31 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           <Pencil />
           Renombrar
         </ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>Automatización</ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuRadioGroup value={shown ?? "none"} onValueChange={(v) => showAutomation(t.id, v === "none" ? undefined : (v as AutoParam))}>
+              <ContextMenuRadioItem value="none">Ocultar</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="volume">Mostrar volumen</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="pan">Mostrar pan</ContextMenuRadioItem>
+            </ContextMenuRadioGroup>
+            <ContextMenuSeparator />
+            <ContextMenuCheckboxItem checked={!t.autoOff} onCheckedChange={(v) => updateTrack(t.id, { autoOff: v !== true })}>
+              Seguir la automatización
+            </ContextMenuCheckboxItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={!t.automation?.volume && !t.automation?.pan}
+              onSelect={() => {
+                useProject.getState().checkpoint();
+                useProject.getState().setAutomation(t.id, "volume", []);
+                useProject.getState().setAutomation(t.id, "pan", []);
+              }}
+            >
+              Borrar las envolventes
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" disabled={!canDelete} onSelect={() => removeTrack(t.id)}>
           <Trash2 />
@@ -273,15 +395,15 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
 }
 
 /**
- * Regla con números de compás (4/4).
+ * Regla con números de compás.
  * Clic = mover el cursor. Arrastrar = crear región de loop.
  * Doble clic sobre la región o clic derecho › «Quitar loop» = borrarla.
  */
 function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number; width: number; timeAt: (clientX: number) => number }) {
-  const { loop, loopEnabled, setLoop } = useProject();
+  const { loop, loopEnabled, setLoop, timeSig } = useProject();
   const drag = useRef<{ x: number; t: number } | null>(null);
 
-  const barPx = (60 / bpm) * 4 * pxPerSec;
+  const barPx = barSeconds(bpm, timeSig) * pxPerSec;
   // Si los compases quedan muy juntos, numerar solo cada N
   const every = Math.max(1, 2 ** Math.ceil(Math.log2(40 / barPx)));
   const bars = Math.ceil(width / barPx);
@@ -341,9 +463,10 @@ function Ruler({ bpm, pxPerSec, width, timeAt }: { bpm: number; pxPerSec: number
 
 /** Líneas de compás (y de tiempo si hay zoom suficiente) en el fondo de cada pista. */
 function GridLines({ bpm, pxPerSec }: { bpm: number; pxPerSec: number }) {
-  const barPx = (60 / bpm) * 4 * pxPerSec;
+  const timeSig = useProject((s) => s.timeSig);
+  const barPx = barSeconds(bpm, timeSig) * pxPerSec;
   const every = Math.max(1, 2 ** Math.ceil(Math.log2(40 / barPx)));
-  const beatPx = gridSeconds(bpm, pxPerSec) * pxPerSec;
+  const beatPx = gridSeconds(bpm, pxPerSec, timeSig) * pxPerSec;
   const layers = [`repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px ${barPx * every}px)`];
   if (beatPx < barPx) {
     layers.push(

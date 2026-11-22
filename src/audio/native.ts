@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import { useInput, type InputChannel } from "./input";
+import { audibleMonitored, channelIndex, useInput } from "./input";
 
 /**
  * Puente con el motor de audio nativo (src-tauri/src/audio.rs).
@@ -98,8 +98,6 @@ export const useNative = create<NativeState>((set) => ({
   setBufferSize: (bufferSize) => set({ bufferSize }),
 }));
 
-const channelIndex = (c: InputChannel) => (c === "1" ? 0 : c === "2" ? 1 : 2);
-
 // --- Dispositivos -----------------------------------------------------------------
 
 export async function refreshNativeDevices() {
@@ -178,7 +176,7 @@ async function stop() {
 /** Con el motor nativo encendido, monitorizar = escuchar por él (y no por Web Audio). */
 function syncMonitor() {
   const on = useNative.getState().status === "on";
-  const monitoring = useInput.getState().monitored.length > 0;
+  const monitoring = audibleMonitored(useInput.getState()).length > 0;
   if (useInput.getState().nativeMonitor !== on) useInput.setState({ nativeMonitor: on });
   if (useNative.getState().available) void invoke("audio_set_monitor", { on: on && monitoring }).catch(console.error);
 }
@@ -215,7 +213,7 @@ useInput.subscribe((s, prev) => {
   if (s.channel !== prev.channel && useNative.getState().status === "on") {
     void invoke("audio_set_input_channel", { channel: channelIndex(s.channel) }).catch(console.error);
   }
-  if (s.monitored !== prev.monitored) syncMonitor();
+  if (s.monitored !== prev.monitored || s.monitorMuted !== prev.monitorMuted) syncMonitor();
 });
 
 if (useNative.getState().available) {

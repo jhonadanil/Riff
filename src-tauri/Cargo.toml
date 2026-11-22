@@ -25,11 +25,17 @@ serde_json = "1"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 rtrb = "0.4.1"
+# Alojar plugins VST3 (inserts de la señal de entrada: amplis, pedales…)
+vst3-host = { version = "0.11.1", default-features = false }
+# Entrada MIDI (controladores como la Maschine)
+midir = "0.11"
 
 # ASIO (baja latencia en Windows). Compilarlo necesita LLVM (libclang);
 # el ASIO SDK lo descarga cpal solo, o se indica con CPAL_ASIO_DIR.
 [target.'cfg(windows)'.dependencies]
 cpal = { version = "0.18.2", features = ["asio"] }
+# Bombear los mensajes de las ventanas de los plugins (la librería de VST3 no lo hace en Windows)
+windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_Foundation"] }
 
 [target.'cfg(not(windows))'.dependencies]
 cpal = "0.18.2"

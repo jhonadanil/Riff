@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Riff · Graba, edita y mezcla rock en casa</title>
+  <meta name="description" content="Riff es un estudio de grabación gratuito para Windows pensado para guitarristas y bandas: enchufas la guitarra, pulsas R y grabas." />
+  <meta property="og:title" content="Riff · Graba, edita y mezcla rock en casa" />
+  <meta property="og:description" content="Estudio de grabación gratuito para Windows. Enchufa la guitarra, pulsa R y graba." />
+  <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#1e1e2e" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preload" href="fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    // Aplicar el tema antes de pintar para que no parpadee
+    try {
+      var t = localStorage.getItem("riff.landing.theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+
+  <header class="top">
+    <a class="brand" href="#" aria-label="Riff, inicio">
+      <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><g stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 14v4M11 10v12M16 5v22M21 11v10M26 14v4"/></g></svg>
+      Riff
+    </a>
+    <nav class="top-nav" aria-label="Principal">
+      <a href="#funciones">Funciones</a>
+      <a href="#teclado">Teclado</a>
+      <a href="#descargar">Descargar</a>
+    </nav>
+    <button class="theme" type="button" id="theme" aria-label="Cambiar entre tema claro y oscuro">
+      <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+    </button>
+  </header>
+
+  <main id="contenido">
+    <section class="hero">
+      <h1>Enchufa la guitarra.<br />Pulsa <span class="key-inline">R</span>.</h1>
+      <p class="lead">Riff es un estudio de grabación gratuito para rock en casa. Grabas, editas y mezclas sin perderte en menús.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/jhonadanil/Riff/releases/latest" data-download>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
+          Descargar para Windows
+        </a>
+        <p class="cta-note"><span data-version>v0.1.0</span> · Gratis · Windows 10 y 11</p>
+      </div>
+
+      <figure class="stage" id="demo" aria-label="Maqueta de la interfaz de Riff: cuatro pistas con clips, transporte y mezclador">
+        <div class="frame" id="frame">
+          <div class="mock" id="mock" aria-hidden="true">
+            <div class="m-bar">
+              <div class="m-left"><b>Riff</b><span>Archivo</span><span class="m-proj">Mi primera canción</span></div>
+              <div class="m-center">
+                <div class="m-pill m-transport">
+                  <button type="button" tabindex="-1" class="m-ic" data-act="rewind"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+                  <button type="button" tabindex="-1" class="m-play" data-act="play"><svg class="s-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg class="s-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+                  <button type="button" tabindex="-1" class="m-ic m-rec" data-act="rec"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg></button>
+                </div>
+                <div class="m-pill m-time" id="m-time">0:00.0 · 1.1</div>
+                <div class="m-pill m-bpm">BPM <span>120</span></div>
+              </div>
+              <div class="m-right">
+                <div class="m-pill m-toggles">
+                  <span class="m-tg" id="m-metro" title="Metrónomo"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4M12 14l3-5M7 22h10l-2.5-17h-5z"/></svg></span>
+                  <span class="m-tg" id="m-loop" title="Loop"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3"/></svg></span>
+                  <span class="m-tg is-on"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15-4-4 6-6 4 4M18 15l4-4-6-6-4 4M6 15a6 6 0 0 0 12 0"/></svg></span>
+                </div>
+                <span class="m-btn">Entrada</span>
+              </div>
+            </div>
+
+            <div class="m-main">
+              <div class="m-ruler"><div class="m-ruler-head"></div><div class="m-ruler-lane" id="m-ruler"></div></div>
+              <div class="m-tracks" id="m-tracks"></div>
+              <div class="m-playhead" id="m-playhead"></div>
+            </div>
+
+            <div class="m-mixer" id="m-mixer"></div>
+          </div>
+        </div>
+        <figcaption class="hint" id="hint"><span class="kbd">Espacio</span> reproduce · <span class="kbd">R</span> graba · <span class="kbd">M</span> metrónomo · <span class="kbd">L</span> loop</figcaption>
+      </figure>
+    </section>
+
+    <section class="steps" aria-label="Cómo se graba en Riff">
+      <ol>
+        <li><strong>Elige la entrada.</strong> <span>Tu interfaz USB, con su driver ASIO.</span></li>
+        <li><strong>Arma la pista.</strong> <span>Escúchate al tocar, con los plugins que quieras.</span></li>
+        <li><strong>Pulsa R.</strong> <span>Un compás de cuenta y a grabar.</span></li>
+      </ol>
+    </section>
+
+    <section class="features" id="funciones">
+      <div class="features-head">
+        <h2>Lo que hace falta para sacar una canción</h2>
+        <p>Un estudio pequeño a propósito: lo esencial bien hecho, sin cien paneles que no vas a abrir.</p>
+      </div>
+      <dl class="rows">
+        <div class="row">
+          <dt>Grabar</dt>
+          <dd>Graba desde tu interfaz de audio con latencia baja usando ASIO. Escúchate mientras tocas, arma varias pistas a la vez y empieza con un compás de cuenta. Si cargas un amplificador VST3 en la pista, puedes grabar ya con el sonido puesto.</dd>
+        </div>
+        <div class="row">
+          <dt>Editar</dt>
+          <dd>Recorta, divide, mueve clips entre pistas, copia, pega y duplica. Fundidos de entrada y salida, cambio de ganancia, normalizado y fundido cruzado entre clips. Todo con deshacer y rehacer.</dd>
+        </div>
+        <div class="row">
+          <dt>Mezclar</dt>
+          <dd>Volumen, panorama, mute y solo por pista; medidores con aviso de saturación; buses y envíos para agrupar la batería o compartir una reverb; automatización de volumen y panorama dibujada sobre la pista.</dd>
+        </div>
+        <div class="row">
+          <dt>Tocar teclas</dt>
+          <dd>Conecta un controlador MIDI, carga un instrumento VST3 en una pista y edita las notas en el piano roll: dibujar, mover, alargar, cuantizar y ajustar la velocidad.</dd>
+        </div>
+        <div class="row">
+          <dt>Terminar</dt>
+          <dd>Exporta la mezcla a WAV de 24 bits. Tu proyecto se guarda como un archivo <code>.riff</code> con sus audios al lado, y se autoguarda cada dos minutos.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="keys" id="teclado">
+      <h2>Las manos en la guitarra</h2>
+      <p class="keys-lead">Casi todo lo que haces mientras grabas tiene su tecla. Prueba: pulsa cualquiera de estas.</p>
+      <ul class="keycaps">
+        <li class="cap cap-wide" data-key=" "><kbd>Espacio</kbd><span>Reproducir / pausar</span></li>
+        <li class="cap" data-key="r"><kbd>R</kbd><span>Grabar</span></li>
+        <li class="cap" data-key="s"><kbd>S</kbd><span>Dividir el clip</span></li>
+        <li class="cap" data-key="m"><kbd>M</kbd><span>Metrónomo</span></li>
+        <li class="cap" data-key="l"><kbd>L</kbd><span>Loop</span></li>
+        <li class="cap" data-key="g"><kbd>G</kbd><span>Rejilla</span></li>
+        <li class="cap" data-key="c"><kbd>C</kbd><span>Cuenta previa</span></li>
+        <li class="cap cap-wide" data-key="z" data-ctrl><kbd>Ctrl Z</kbd><span>Deshacer</span></li>
+      </ul>
+    </section>
+
+    <section class="get" id="descargar">
+      <h2>Descarga Riff</h2>
+      <p class="get-lead">Es gratis. Instálalo, elige tu interfaz de audio y graba.</p>
+      <a class="btn btn-primary btn-lg" href="https://github.com/jhonadanil/Riff/releases/latest" data-download>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
+        Descargar para Windows
+      </a>
+      <p class="cta-note"><span data-version>v0.1.0</span> · Instalador para Windows 10 y 11 de 64 bits</p>
+
+      <div class="get-notes">
+        <p><strong>Interfaz de audio.</strong> Funciona con cualquier interfaz con driver ASIO; ASIO4ALL también sirve.</p>
+        <p><strong>Aviso de Windows.</strong> El instalador todavía no está firmado, así que SmartScreen puede avisarte. Pulsa «Más información» y luego «Ejecutar de todos modos».</p>
+        <p><strong>Solo Windows, por ahora.</strong> Todavía no hay versión para macOS ni Linux.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Riff · <span data-version>v0.1.0</span></span>
+    <a href="https://github.com/jhonadanil/Riff">Código en GitHub</a>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

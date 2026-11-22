@@ -46,6 +46,8 @@ impl AtomicF32 {
 const STEREO: u8 = 2;
 
 struct Shared {
+    /// Plugins VST3 insertados entre la entrada y la salida.
+    chain: Arc<crate::plugins::Chain>,
     monitor: AtomicBool,
     gain: AtomicF32,
     input_channel: AtomicU8,
@@ -156,6 +158,7 @@ pub struct Engine {
 impl Default for Engine {
     fn default() -> Self {
         let shared = Arc::new(Shared {
+            chain: Arc::new(crate::plugins::Chain::default()),
             monitor: AtomicBool::new(false),
             gain: AtomicF32::new(1.0),
             input_channel: AtomicU8::new(0),
@@ -188,6 +191,10 @@ fn spawn_audio_thread(
 }
 
 impl Engine {
+    pub fn chain(&self) -> Arc<crate::plugins::Chain> {
+        self.shared.chain.clone()
+    }
+
     /// Manda una orden al hilo de audio y espera la respuesta (como mucho `timeout`).
     fn call<T>(&self, timeout: Duration, make: impl FnOnce(Reply<T>) -> Cmd) -> Result<T, String> {
         let (tx, rx) = mpsc::channel();
@@ -409,6 +416,9 @@ fn start(shared: &Arc<Shared>, config: &StartConfig) -> Result<(Running, EngineI
     shared.input_channel.store(config.input_channel.min(STEREO), Ordering::Relaxed);
     shared.xruns.store(0, Ordering::Relaxed);
     shared.in_block.store(0, Ordering::Relaxed);
+    log("  ajustando los plugins…");
+    shared.chain.prepare(in_rate as f64);
+    log("  plugins listos");
 
     // Cola de ~100 ms en frames estéreo; en la práctica solo lleva un búfer o dos
     let capacity = (in_rate as usize / 10).max(4096) * 2;
@@ -526,15 +536,24 @@ where
     f32: FromSample<T>,
 {
     let channels = config.channels as usize;
+    // Buffers para los plugins (se reservan una vez; en el callback no se pide memoria)
+    let mut bufs = vst3_host::AudioBuffers::new(2, 2, 0, config.sample_rate as f64);
+    for ch in bufs.inputs.iter_mut().chain(bufs.outputs.iter_mut()) {
+        ch.reserve(8192);
+    }
+    let mut scratch = crate::plugins::Scratch::new();
     device
         .build_input_stream::<T, _, _>(
             config.clone(),
             move |data: &[T], info: &cpal::InputCallbackInfo| {
                 let ts = info.timestamp();
                 shared.input_latency.store(ms(ts.callback.duration_since(ts.capture)));
-                shared.in_block.store((data.len() / channels) as u32, Ordering::Relaxed);
+                let n = data.len() / channels;
+                shared.in_block.store(n as u32, Ordering::Relaxed);
                 let sel = shared.input_channel.load(Ordering::Relaxed);
                 let mut p = [0f32; 2];
+                bufs.inputs[0].clear();
+                bufs.inputs[1].clear();
                 for frame in data.chunks_exact(channels) {
                     let a = f32::from_sample(frame[0]);
                     let b = if channels > 1 { f32::from_sample(frame[1]) } else { a };
@@ -546,13 +565,34 @@ where
                         1 => (b, b),
                         _ => (a, b),
                     };
-                    if producer.slots() >= 2 {
-                        let _ = producer.push(l);
-                        let _ = producer.push(r);
-                    }
+                    bufs.inputs[0].push(l);
+                    bufs.inputs[1].push(r);
                 }
                 shared.peaks[0].fetch_max(p[0]);
                 shared.peaks[1].fetch_max(p[1]);
+
+                // Cada pista que se escucha toma la entrada que tiene elegida y pasa por sus plugins
+                // (si no se escucha nada, nadie oye el resultado)
+                if shared.monitor.load(Ordering::Relaxed) || shared.chain.is_playing() || shared.chain.is_recording() || shared.chain.has_armed() {
+                    for c in 0..2 {
+                        scratch.raw[c].clear();
+                    }
+                    for frame in data.chunks_exact(channels) {
+                        let a = f32::from_sample(frame[0]);
+                        let b = if channels > 1 { f32::from_sample(frame[1]) } else { a };
+                        scratch.raw[0].push(a);
+                        scratch.raw[1].push(b);
+                    }
+                    scratch.latency = (shared.input_latency.load() / 1000.0) as f64;
+                    shared.chain.process(&mut bufs, &mut scratch);
+                }
+
+                for (l, r) in bufs.inputs[0].iter().zip(&bufs.inputs[1]) {
+                    if producer.slots() >= 2 {
+                        let _ = producer.push(*l);
+                        let _ = producer.push(*r);
+                    }
+                }
             },
             |err| log(format!("error de entrada: {err}")),
             None,
@@ -623,7 +663,7 @@ where
                 let ts = info.timestamp();
                 shared.output_latency.store(ms(ts.playback.duration_since(ts.callback)));
                 let frames = data.len() / channels;
-                let monitor = shared.monitor.load(Ordering::Relaxed);
+                let monitor = shared.monitor.load(Ordering::Relaxed) || shared.chain.is_playing() || shared.chain.has_armed();
                 let gain = shared.gain.load();
                 let mut starved = false;
 
@@ -687,4 +727,56 @@ where
             None,
         )
         .map_err(|e| format!("No se pudo abrir la salida: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Arranca el motor de verdad con los dispositivos predeterminados de WASAPI y comprueba
+    /// que no se cuelga, que la entrada entrega bloques y que la salida los consume.
+    #[test]
+    fn arranca_y_circula_audio_por_wasapi() {
+        let devices = match list_devices("WASAPI") {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("(sin WASAPI: {e})");
+                return;
+            }
+        };
+        let (Some(inp), Some(out)) = (
+            devices.iter().find(|d| d.is_default_input),
+            devices.iter().find(|d| d.is_default_output),
+        ) else {
+            eprintln!("(sin dispositivos predeterminados)");
+            return;
+        };
+        let engine = Engine::default();
+        let config = StartConfig {
+            host: "WASAPI".into(),
+            output_host: None,
+            input_device: inp.id.clone(),
+            output_device: out.id.clone(),
+            buffer_size: None,
+            input_channel: 0,
+        };
+        let t0 = std::time::Instant::now();
+        let (run, info) = match start(&engine.shared, &config) {
+            Ok(r) => r,
+            // 0x8889000A: otro programa (p. ej. la propia app abierta) tiene el dispositivo
+            Err(e) if e.contains("-2004287478") => {
+                eprintln!("(dispositivo en uso por otro programa: prueba omitida)");
+                return;
+            }
+            Err(e) => panic!("el motor no arranca: {e}"),
+        };
+        eprintln!("arrancó en {:.1?}: entrada «{}», salida «{}», {} Hz", t0.elapsed(), info.input_name, info.output_name, info.sample_rate);
+        engine.shared.monitor.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(1500));
+        let in_block = engine.shared.in_block.load(Ordering::Relaxed);
+        let xruns = engine.shared.xruns.load(Ordering::Relaxed);
+        eprintln!("bloque de entrada: {in_block} frames, cortes: {xruns}, latencia salida: {:.1} ms", engine.shared.output_latency.load());
+        assert!(in_block > 0, "la entrada no entrega bloques");
+        drop(run);
+    }
 }

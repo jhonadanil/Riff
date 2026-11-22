@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { position } from "@/audio/engine";
-import { LIVE_PEAKS_PER_SEC, livePeaks, useRecorder } from "@/audio/recorder";
+import { livePeaks, useRecorder } from "@/audio/recorder";
+import { LIVE_PEAKS_PER_SEC, liveMidi, livePeaksBy } from "@/audio/nativeTakes";
+import { useTrackKind } from "@/audio/chains";
 
 const REC_COLOR = "var(--rec)";
 
@@ -8,6 +10,7 @@ const REC_COLOR = "var(--rec)";
 export function RecordingClip({ trackId, pxPerSec }: { trackId: string; pxPerSec: number }) {
   const active = useRecorder((r) => (r.phase === "recording" || r.phase === "finishing") && r.trackIds.includes(trackId));
   const start = useRecorder((r) => r.start);
+  const kind = useTrackKind(trackId);
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -20,13 +23,15 @@ export function RecordingClip({ trackId, pxPerSec }: { trackId: string; pxPerSec
       if (box && canvas) {
         const width = Math.max(2, (position() - start) * pxPerSec);
         box.style.width = `${width}px`;
-        drawPeaks(canvas, width, pxPerSec);
+        if (kind === "midi") drawNotes(canvas, width, pxPerSec);
+        // Las pistas que graba el motor nativo tienen su onda; si no, la del grabador del navegador
+        else drawPeaks(canvas, width, pxPerSec, livePeaksBy.get(trackId) ?? livePeaks);
       }
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [active, start, pxPerSec]);
+  }, [active, start, pxPerSec, kind, trackId]);
 
   if (!active) return null;
   return (
@@ -48,7 +53,38 @@ export function RecordingClip({ trackId, pxPerSec }: { trackId: string; pxPerSec
   );
 }
 
-function drawPeaks(canvas: HTMLCanvasElement, width: number, pxPerSec: number) {
+/** Las notas que se están tocando, como barras (más arriba = más aguda). */
+function drawNotes(canvas: HTMLCanvasElement, width: number, pxPerSec: number) {
+  const dpr = window.devicePixelRatio || 1;
+  const h = canvas.clientHeight;
+  const w = Math.ceil(width);
+  if (canvas.width !== Math.ceil(w * dpr) || canvas.height !== Math.ceil(h * dpr)) {
+    canvas.width = Math.ceil(w * dpr);
+    canvas.height = Math.ceil(h * dpr);
+  }
+  const g = canvas.getContext("2d");
+  if (!g) return;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  if (!liveMidi.length) return;
+  let lo = 127;
+  let hi = 0;
+  for (const n of liveMidi) {
+    lo = Math.min(lo, n.n);
+    hi = Math.max(hi, n.n);
+  }
+  const rows = Math.max(hi - lo + 1, 8);
+  const top = hi + (rows - (hi - lo + 1)) / 2;
+  const rowH = h / rows;
+  g.fillStyle = REC_COLOR;
+  for (const n of liveMidi) {
+    g.globalAlpha = 0.35 + (n.v / 127) * 0.65;
+    g.fillRect(n.t * pxPerSec, (top - n.n) * rowH, Math.max(2, n.d * pxPerSec), Math.max(2, rowH * 0.8));
+  }
+  g.globalAlpha = 1;
+}
+
+function drawPeaks(canvas: HTMLCanvasElement, width: number, pxPerSec: number, peaks: number[]) {
   const dpr = window.devicePixelRatio || 1;
   const h = canvas.clientHeight;
   const w = Math.ceil(width);
@@ -66,9 +102,9 @@ function drawPeaks(canvas: HTMLCanvasElement, width: number, pxPerSec: number) {
   // Una barra por píxel con el pico más alto que cae en él
   for (let x = 0; x < w; x++) {
     const a = Math.floor(x / pxPerPeak);
-    const b = Math.min(livePeaks.length, Math.max(a + 1, Math.floor((x + 1) / pxPerPeak)));
+    const b = Math.min(peaks.length, Math.max(a + 1, Math.floor((x + 1) / pxPerPeak)));
     let v = 0;
-    for (let i = a; i < b; i++) if (livePeaks[i] > v) v = livePeaks[i];
+    for (let i = a; i < b; i++) if (peaks[i] > v) v = peaks[i];
     if (!v) continue;
     const half = Math.max(0.5, Math.min(1, v) * mid);
     g.fillRect(x, mid - half, 1, half * 2);

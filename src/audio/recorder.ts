@@ -1,9 +1,23 @@
 import * as Tone from "tone";
 import { create } from "zustand";
 import { toast } from "sonner";
-import { useProject } from "@/store/project";
+import { beatSeconds, useProject } from "@/store/project";
 import * as engine from "./engine";
-import { inputNode, recordingLatencyMs, useInput, waitForInput } from "./input";
+import { invoke } from "@tauri-apps/api/core";
+import { inputNode, recordingLatencyMs, trackInput, useInput, waitForInput } from "./input";
+import {
+  finishMidi,
+  finishWet,
+  LIVE_PEAKS_PER_SEC,
+  native,
+  startLiveMidi,
+  startLivePeaks,
+  startMidi,
+  startWet,
+  stopLiveMidi,
+  stopLivePeaks,
+  takes,
+} from "./nativeTakes";
 
 /**
  * Grabación desde la entrada de audio a las pistas armadas.
@@ -90,7 +104,6 @@ let segments: Segment[] = [];
 let onDone: (() => void) | null = null;
 
 /** Picos de la toma en curso para dibujarla mientras se graba. */
-export const LIVE_PEAKS_PER_SEC = 100;
 export const livePeaks: number[] = [];
 /** Muestra (del AudioContext) en la que arranca el transporte al grabar. */
 let startFrame = 0;
@@ -148,8 +161,15 @@ function addLivePeaks(seg: Segment) {
 let cancelCountIn: (() => void) | null = null;
 let startTimer: ReturnType<typeof setTimeout> | null = null;
 /** Tiempo del AudioContext en que arranca la toma (para la cuenta atrás). */
-let startTime = 0;
 let beatSec = 0.5;
+
+/** Un solo paso de deshacer por toma, sin importar cuántos clips (MIDI, con efectos, limpios) cree. */
+let checkpointed = false;
+function checkpointOnce() {
+  if (checkpointed) return;
+  checkpointed = true;
+  useProject.getState().checkpoint();
+}
 
 /** Pistas que van a grabar; si no hay ninguna armada, se arma la seleccionada. */
 function targetTracks() {
@@ -178,7 +198,17 @@ export async function startRecording() {
 
   try {
     await engine.ensureAudioStarted();
-    if (!(await waitForInput())) {
+    // Las pistas con instrumento graban MIDI; las demás, audio de la entrada
+    await startMidi(trackIds);
+    if (native.midiTracks.length) startLiveMidi();
+    await startWet(trackIds);
+    if (native.wetTracks.length) startLivePeaks();
+    const audioIds = trackIds.filter((id) => !native.midiTracks.includes(id) && !native.wetTracks.includes(id));
+    if (audioIds.length && !(await waitForInput())) {
+      void invoke("midi_record_stop").catch(() => null);
+      if (native.wetTracks.length) void invoke("audio_record_stop").catch(() => null);
+      native.midiTracks = [];
+      native.wetTracks = [];
       const { error, setPanelOpen } = useInput.getState();
       toast.error("No se puede grabar: la entrada de audio no está disponible", {
         description: error ?? undefined,
@@ -187,10 +217,10 @@ export async function startRecording() {
       useRecorder.setState({ phase: "idle", trackIds: [] });
       return;
     }
-    const n = await ensureNode();
+    const n = audioIds.length ? await ensureNode() : null;
 
     const ctx = Tone.getContext();
-    const { isPlaying, countIn, bpm, setPlaying } = useProject.getState();
+    const { isPlaying, countIn, bpm, timeSig, setPlaying } = useProject.getState();
     segments = [];
     livePeaks.length = 0;
     engine.setRecordingMode(true);
@@ -198,36 +228,37 @@ export async function startRecording() {
 
     if (isPlaying) {
       // Ya sonando: grabar desde ya, sin cuenta previa
-      startTime = ctx.currentTime;
-      startFrame = Math.round(startTime * ctx.sampleRate);
+      takes.startTime = ctx.currentTime;
+      startFrame = Math.round(takes.startTime * ctx.sampleRate);
       captureFrame = startFrame + latencyFrames;
-      n.port.postMessage("start");
-      useRecorder.setState({ phase: "recording", start: engine.positionAtTime(startTime) });
+      n?.port.postMessage("start");
+      useRecorder.setState({ phase: "recording", start: engine.positionAtTime(takes.startTime) });
       return;
     }
 
     const from = engine.position();
-    beatSec = 60 / bpm;
-    const beats = countIn ? 4 : 0;
+    beatSec = beatSeconds(bpm, timeSig);
+    // La cuenta previa dura un compás
+    const beats = countIn ? timeSig[0] : 0;
     const t0 = ctx.currentTime + 0.15;
-    startTime = t0 + beats * beatSec;
-    startFrame = Math.round(startTime * ctx.sampleRate);
+    takes.startTime = t0 + beats * beatSec;
+    startFrame = Math.round(takes.startTime * ctx.sampleRate);
     captureFrame = startFrame + latencyFrames;
-    n.port.postMessage("start"); // lo anterior a startFrame se descarta al final
+    n?.port.postMessage("start"); // lo anterior a startFrame se descarta al final
     if (beats) cancelCountIn = engine.countIn(t0, beats, beatSec);
     useRecorder.setState({ phase: beats ? "countin" : "recording", start: from });
 
     // El transporte se programa justo antes de que acabe la cuenta, para poder cancelarla
     const arm = () => {
       startTimer = null;
-      engine.startAt(startTime, from);
+      engine.startAt(takes.startTime, from);
       setPlaying(true);
-      const wait = Math.max(0, (startTime - Tone.getContext().currentTime) * 1000);
+      const wait = Math.max(0, (takes.startTime - Tone.getContext().currentTime) * 1000);
       setTimeout(() => {
         if (useRecorder.getState().phase === "countin") useRecorder.setState({ phase: "recording" });
       }, wait);
     };
-    const lead = (startTime - ctx.currentTime - 0.1) * 1000;
+    const lead = (takes.startTime - ctx.currentTime - 0.1) * 1000;
     if (lead > 0) startTimer = setTimeout(arm, lead);
     else arm();
   } catch (err) {
@@ -244,6 +275,12 @@ function abort() {
   cancelCountIn?.();
   cancelCountIn = null;
   node?.port.postMessage("stop");
+  stopLiveMidi();
+  stopLivePeaks();
+  if (native.midiTracks.length) void invoke("midi_record_stop").catch(() => null);
+  native.midiTracks = [];
+  if (native.wetTracks.length) void invoke("audio_record_stop").catch(() => null);
+  native.wetTracks = [];
   onDone = null;
   segments = [];
   livePeaks.length = 0;
@@ -261,7 +298,7 @@ export async function stopRecording() {
   useProject.getState().setPlaying(false);
 
   // Cancelada durante la cuenta previa: no hay toma
-  if (phase === "countin" || stopTime <= startTime) {
+  if (phase === "countin" || stopTime <= takes.startTime) {
     abort();
     return;
   }
@@ -269,35 +306,81 @@ export async function stopRecording() {
   useRecorder.setState({ phase: "finishing" });
   cancelCountIn?.();
   cancelCountIn = null;
-  await new Promise<void>((resolve) => {
-    onDone = resolve;
-    node!.port.postMessage("stop");
-  });
+  const audioIds = trackIds.filter((id) => !native.midiTracks.includes(id) && !native.wetTracks.includes(id));
+  if (audioIds.length) {
+    await new Promise<void>((resolve) => {
+      onDone = resolve;
+      node!.port.postMessage("stop");
+    });
+  }
   engine.setRecordingMode(false);
+  checkpointed = false;
+  const take = useProject.getState().clips.filter((c) => /^Toma \d+$/.test(c.name)).length + 1;
+  await finishMidi(start, stopTime, take, checkpointOnce);
+  const wet = await finishWet(stopTime);
+  stopLivePeaks();
 
   // Lo que suena hasta stopTime entra `latencia` más tarde: se toma ese mismo tramo desplazado
   const stopFrame = Math.round(stopTime * ctx.sampleRate);
-  const audio = assemble(captureFrame, Math.max(captureFrame, stopFrame - Math.max(0, startFrame - captureFrame)));
+  const audio = audioIds.length
+    ? assemble(captureFrame, Math.max(captureFrame, stopFrame - Math.max(0, startFrame - captureFrame)))
+    : null;
   segments = [];
   livePeaks.length = 0;
   useRecorder.setState({ phase: "idle", trackIds: [] });
-  if (!audio) return;
+  if (wet.length) {
+    const s = useProject.getState();
+    checkpointOnce();
+    for (const { trackId, buffer } of wet) {
+      if (!s.tracks.some((t) => t.id === trackId)) continue;
+      s.addClip({
+        id: crypto.randomUUID(),
+        trackId,
+        name: `Toma ${take}`,
+        start,
+        offset: 0,
+        duration: buffer.duration,
+        sourceDuration: buffer.duration,
+        bufferId: engine.addRecordedBuffer(buffer),
+      });
+    }
+  }
+  if (!audio) {
+    // Solo MIDI o solo con efectos: el cursor vuelve a donde empezó la toma
+    engine.seek(start);
+    return;
+  }
 
-  const bufferId = engine.addRecordedBuffer(audio);
+  // Cada pista se queda con la entrada que tiene elegida: una sola entrada o las dos
+  const made = new Map<string, { id: string; duration: number }>();
+  const bufferFor = (sel: "1" | "2" | "stereo") => {
+    let m = made.get(sel);
+    if (!m) {
+      let buf = audio;
+      if (sel !== "stereo" && audio.numberOfChannels > 1) {
+        buf = Tone.getContext().createBuffer(1, audio.length, audio.sampleRate) as unknown as AudioBuffer;
+        buf.copyToChannel(audio.getChannelData(sel === "2" ? 1 : 0), 0);
+      }
+      m = { id: engine.addRecordedBuffer(buf), duration: buf.duration };
+      made.set(sel, m);
+    }
+    return m;
+  };
   const s = useProject.getState();
-  const take = s.clips.filter((c) => /^Toma \d+$/.test(c.name)).length + 1;
-  s.checkpoint();
-  for (const trackId of trackIds) {
-    if (!s.tracks.some((t) => t.id === trackId)) continue;
+  checkpointOnce();
+  for (const trackId of audioIds) {
+    const track = s.tracks.find((t) => t.id === trackId);
+    if (!track) continue;
+    const buf = bufferFor(trackInput(track));
     s.addClip({
       id: crypto.randomUUID(),
       trackId,
       name: `Toma ${take}`,
       start,
       offset: 0,
-      duration: audio.duration,
-      sourceDuration: audio.duration,
-      bufferId,
+      duration: buf.duration,
+      sourceDuration: buf.duration,
+      bufferId: buf.id,
     });
   }
   // El cursor vuelve a donde empezó la toma, listo para escucharla
@@ -327,6 +410,6 @@ function assemble(from: number, to: number) {
 /** Tiempos que faltan de la cuenta previa (4, 3, 2, 1) o null si no hay cuenta. */
 export function countInRemaining() {
   if (useRecorder.getState().phase !== "countin") return null;
-  const left = startTime - Tone.getContext().currentTime;
+  const left = takes.startTime - Tone.getContext().currentTime;
   return Math.max(1, Math.ceil(left / beatSec - 1e-6));
 }

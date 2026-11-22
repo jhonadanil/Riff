@@ -1,6 +1,6 @@
 import * as Tone from "tone";
 import { create } from "zustand";
-import { useProject } from "@/store/project";
+import { useProject, type Track } from "@/store/project";
 import * as engine from "./engine";
 
 /**
@@ -16,6 +16,9 @@ import * as engine from "./engine";
 
 /** Qué canales de la interfaz se usan: entrada 1, entrada 2 o las dos en estéreo. */
 export type InputChannel = "1" | "2" | "stereo";
+
+/** Cómo se lo cuenta al motor nativo: 0 = entrada 1, 1 = entrada 2, 2 = las dos. */
+export const channelIndex = (c: InputChannel) => (c === "1" ? 0 : c === "2" ? 1 : 2);
 export type InputDevice = { id: string; label: string };
 
 type InputState = {
@@ -29,8 +32,10 @@ type InputState = {
   streamChannels: number;
   /** Latencia estimada en ms; la de entrada no siempre la informa el sistema. */
   latency: { input: number | null; output: number } | null;
-  /** Pistas que están monitorizando la entrada. */
+  /** Pistas en las que te oyes al tocar (botón de auriculares). Con el monitor silenciado no suena ninguna. */
   monitored: string[];
+  /** Monitor silenciado (p. ej. cantando con micro y parlantes, para que no se acople). */
+  monitorMuted: boolean;
   /** El diálogo de entrada está visible (necesita el medidor). */
   panelOpen: boolean;
   /** Hay alguna pista armada: la entrada se deja abierta para grabar al instante. */
@@ -43,6 +48,7 @@ type InputState = {
   setDevice: (deviceId: string | null) => void;
   setChannel: (channel: InputChannel) => void;
   toggleMonitor: (trackId: string) => void;
+  setMonitorMuted: (muted: boolean) => void;
   setPanelOpen: (open: boolean) => void;
   setLatencyOffset: (ms: number) => void;
 };
@@ -82,6 +88,7 @@ export const useInput = create<InputState>((set) => ({
   streamChannels: 2,
   latency: null,
   monitored: [],
+  monitorMuted: false,
   panelOpen: false,
   armed: useProject.getState().tracks.some((t) => t.armed),
   nativeMonitor: false,
@@ -92,6 +99,7 @@ export const useInput = create<InputState>((set) => ({
     set((s) => ({
       monitored: s.monitored.includes(trackId) ? s.monitored.filter((id) => id !== trackId) : [...s.monitored, trackId],
     })),
+  setMonitorMuted: (monitorMuted) => set({ monitorMuted }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
   setLatencyOffset: (ms) => set({ latencyOffsetMs: Math.round(Math.min(200, Math.max(-100, ms))) }),
 }));
@@ -131,6 +139,16 @@ let source: MediaStreamAudioSourceNode | null = null;
 let route: Tone.ToneAudioNode[] = [];
 /** Salida de la entrada: mono (entrada 1 o 2) o estéreo. */
 const out = new Tone.Gain();
+/** Una salida por cada elección de entrada: cada pista monitorizada toma la suya (guitarra en la 2, voz en la 1…). */
+const monitorOut: Record<InputChannel, Tone.Gain> = { "1": new Tone.Gain(), "2": new Tone.Gain(), stereo: new Tone.Gain() };
+monitorOut["1"].channelCount = 1;
+monitorOut["2"].channelCount = 1;
+monitorOut.stereo.channelCount = 2;
+for (const g of Object.values(monitorOut)) g.channelCountMode = "explicit";
+/** Las dos entradas de la interfaz tal cual (para grabar cada pista con la suya). */
+const rawOut = new Tone.Gain();
+rawOut.channelCount = 2;
+rawOut.channelCountMode = "explicit";
 const analyser = new Tone.Analyser({ type: "waveform", size: 1024, channels: 2 });
 out.connect(analyser);
 /** Señal tal cual llega del dispositivo, canal por canal (para ver dónde entra cada instrumento). */
@@ -151,9 +169,13 @@ function errorMessage(err: unknown) {
 function buildRoute() {
   for (const n of route) n.dispose();
   route = [];
+  for (const n of monitorRoute) n.dispose();
+  monitorRoute = [];
   if (!source) return;
   source.disconnect();
   Tone.connect(source, rawAnalyser);
+  Tone.connect(source, rawOut);
+  buildMonitorRoute();
 
   const { channel } = useInput.getState();
   if (channel === "stereo") {
@@ -173,6 +195,19 @@ function buildRoute() {
   out.channelCountMode = "explicit";
   mono.connect(out);
   route = [split, mono];
+}
+
+/** Reparte la señal en las tres salidas de monitor (entrada 1, entrada 2, estéreo). */
+let monitorRoute: Tone.ToneAudioNode[] = [];
+
+function buildMonitorRoute() {
+  if (!source) return;
+  const split = new Tone.Split(2);
+  Tone.connect(source, split);
+  split.connect(monitorOut["1"], 0, 0);
+  split.connect(monitorOut["2"], 1, 0);
+  Tone.connect(source, monitorOut.stereo);
+  monitorRoute.push(split);
 }
 
 function measureLatency() {
@@ -232,10 +267,12 @@ async function openInput() {
 }
 
 function closeInput(updateStatus = true) {
-  for (const ch of connected.values()) safeDisconnect(ch);
+  for (const c of connected.values()) safeDisconnect(c);
   connected.clear();
   for (const n of route) n.dispose();
   route = [];
+  for (const n of monitorRoute) n.dispose();
+  monitorRoute = [];
   source?.disconnect();
   source = null;
   stream?.getTracks().forEach((t) => t.stop());
@@ -249,42 +286,50 @@ function closeInput(updateStatus = true) {
 // --- Monitorización ---------------------------------------------------------
 
 /** Pistas a cuyo canal está conectada ahora la entrada. */
-const connected = new Map<string, Tone.Channel>();
+const connected = new Map<string, { ch: Tone.Channel; src: Tone.Gain }>();
 
-function safeDisconnect(ch: Tone.Channel) {
+function safeDisconnect({ ch, src }: { ch: Tone.Channel; src: Tone.Gain }) {
   try {
-    out.disconnect(ch);
+    src.disconnect(ch);
   } catch {
     // el canal ya se había desconectado o eliminado
   }
 }
 
+/** Pistas que se oyen ahora: las elegidas, salvo que el monitor esté silenciado. */
+export const audibleMonitored = (s: Pick<InputState, "monitored" | "monitorMuted">) => (s.monitorMuted ? [] : s.monitored);
+
 function syncMonitoring() {
-  const { monitored, status, nativeMonitor } = useInput.getState();
-  const want = new Map<string, Tone.Channel>();
+  const { status, nativeMonitor } = useInput.getState();
+  const monitored = audibleMonitored(useInput.getState());
+  const want = new Map<string, { ch: Tone.Channel; src: Tone.Gain }>();
   if (status === "open" && !nativeMonitor) {
+    const { tracks } = useProject.getState();
     for (const id of monitored) {
       const ch = engine.trackChannel(id);
-      if (ch) want.set(id, ch);
+      const track = tracks.find((t) => t.id === id);
+      if (ch && track) want.set(id, { ch, src: monitorOut[trackInput(track)] });
     }
   }
-  for (const [id, ch] of connected) {
-    if (want.get(id) !== ch) {
-      safeDisconnect(ch);
+  for (const [id, c] of connected) {
+    const w = want.get(id);
+    if (!w || w.ch !== c.ch || w.src !== c.src) {
+      safeDisconnect(c);
       connected.delete(id);
     }
   }
-  for (const [id, ch] of want) {
+  for (const [id, w] of want) {
     if (!connected.has(id)) {
-      out.connect(ch);
-      connected.set(id, ch);
+      w.src.connect(w.ch);
+      connected.set(id, w);
     }
   }
 }
 
 // --- Ciclo de vida ----------------------------------------------------------
 
-const needsInput = (s: InputState) => s.panelOpen || s.armed || s.monitored.length > 0;
+// Con el motor nativo encendido la interfaz la tiene abierta él: el navegador no la abre (ni hace falta)
+const needsInput = (s: InputState) => !s.nativeMonitor && (s.panelOpen || s.armed || s.monitored.length > 0);
 
 useInput.subscribe((s, prev) => {
   if (s.deviceId !== prev.deviceId || s.channel !== prev.channel || s.latencyOffsetMs !== prev.latencyOffsetMs) {
@@ -300,8 +345,18 @@ useInput.subscribe((s, prev) => {
     closeInput();
   }
 
-  if (s.channel !== prev.channel) buildRoute();
-  if (s.monitored !== prev.monitored || s.status !== prev.status || s.nativeMonitor !== prev.nativeMonitor) syncMonitoring();
+  if (s.channel !== prev.channel) {
+    buildRoute();
+    syncMonitoring();
+  }
+  if (
+    s.monitored !== prev.monitored ||
+    s.monitorMuted !== prev.monitorMuted ||
+    s.status !== prev.status ||
+    s.nativeMonitor !== prev.nativeMonitor
+  ) {
+    syncMonitoring();
+  }
 });
 
 // Al borrar pistas (o abrir otro proyecto) dejar de monitorizar las que ya no existen
@@ -347,9 +402,17 @@ export function recordingLatencyMs() {
   return { auto, offset: latencyOffsetMs, total: auto + latencyOffsetMs };
 }
 
-/** Nodo con la señal de entrada ya elegida (mono o estéreo), para grabarla. */
+/** Últimos picos de las dos entradas según el motor nativo (los escribe src/audio/levels.ts). */
+export const nativePeaks: [number, number] = [0, 0];
+
+/** Nodo con las dos entradas de la interfaz tal cual, para grabarlas (cada pista toma la suya). */
 export function inputNode() {
-  return out;
+  return rawOut;
+}
+
+/** Entrada que usa una pista: la suya o, si no tiene, la predeterminada de los ajustes. */
+export function trackInput(t: Track): InputChannel {
+  return t.input ?? useInput.getState().channel;
 }
 
 /** Vuelve a intentar abrir la entrada (tras un error). */
@@ -362,7 +425,14 @@ export function retryInput() {
  * Sin argumento, la señal que se usa (tras elegir canal); con 0 o 1, esa entrada del dispositivo en bruto.
  */
 export function inputLevel(rawChannel?: 0 | 1) {
-  if (useInput.getState().status !== "open") return { peak: 0, rms: 0 };
+  const st = useInput.getState();
+  // Con el motor nativo los niveles vienen de él (los lee src/audio/levels.ts)
+  if (st.nativeMonitor) {
+    const [a, b] = nativePeaks;
+    const peak = rawChannel !== undefined ? nativePeaks[rawChannel] : st.channel === "1" ? a : st.channel === "2" ? b : Math.max(a, b);
+    return { peak, rms: peak * 0.7 };
+  }
+  if (st.status !== "open") return { peak: 0, rms: 0 };
   const value = (rawChannel === undefined ? analyser : rawAnalyser).getValue();
   const all = Array.isArray(value) ? value : [value];
   const chans = rawChannel === undefined ? all : all.slice(rawChannel, rawChannel + 1);

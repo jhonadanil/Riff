@@ -17,6 +17,7 @@ export async function togglePlay() {
  * Atajos de teclado globales:
  * Espacio play/pausa · R grabar/parar · C cuenta previa · Inicio volver al inicio · S dividir · Supr borrar clip
  * Ctrl+Z deshacer · Ctrl+Y / Ctrl+Shift+Z rehacer · M metrónomo · L loop · G rejilla
+ * Ctrl+C copiar · Ctrl+V pegar en el cursor · Ctrl+D duplicar · Ctrl+A seleccionar todo
  * Ctrl+N nuevo · Ctrl+O abrir · Ctrl+S guardar · Ctrl+Shift+S guardar como · Ctrl+I importar · Ctrl+E exportar
  */
 export function useShortcuts() {
@@ -34,6 +35,10 @@ export function useShortcuts() {
       else if (ctrl && key === "s") (e.shiftKey ? saveProjectAs : saveProject)();
       else if (ctrl && key === "i") document.getElementById("import-audio-input")?.click();
       else if (ctrl && key === "e") exportWav();
+      else if (ctrl && key === "c") handled = s.copySelection();
+      else if (ctrl && key === "v") s.paste(engine.position(), s.selectedTrackId);
+      else if (ctrl && key === "d") s.duplicateSelection();
+      else if (ctrl && key === "a") s.selectAllClips();
       else if (ctrl && key === "z" && !e.shiftKey) s.undo();
       else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) s.redo();
       else if (ctrl || e.altKey) handled = false;
@@ -42,11 +47,11 @@ export function useShortcuts() {
       else if (key === "c") s.toggleCountIn();
       else if (e.key === "Home") engine.seek(0);
       else if (key === "s") s.splitAt(engine.position());
-      else if ((e.key === "Delete" || e.key === "Backspace") && s.selectedClipId) s.removeClip(s.selectedClipId);
+      else if ((e.key === "Delete" || e.key === "Backspace") && s.selectedClipIds.length) s.removeClips(s.selectedClipIds);
       else if (key === "m") s.toggleMetronome();
       else if (key === "l") s.toggleLoop();
       else if (key === "g") s.toggleSnap();
-      else if (e.key === "Escape") s.selectClip(null);
+      else if (e.key === "Escape") (s.editingClipId ? s.openPianoRoll(null) : s.selectClip(null));
       else handled = false;
 
       if (handled) e.preventDefault();

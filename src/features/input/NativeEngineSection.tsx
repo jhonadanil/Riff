@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { nativeMeter, restartNative, useNative, type NativeDevice, type NativeHost, type NativeMeter } from "@/audio/native";
+import { restartNative, useNative, type NativeDevice, type NativeHost, type NativeMeter } from "@/audio/native";
+import { subscribeLevels } from "@/audio/levels";
 
 const DRIVER_BUFFER = "driver";
 const BUFFER_SIZES = [32, 64, 128, 256, 512, 1024];
@@ -160,19 +161,17 @@ function NativeStatus() {
   const bars = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
-    let alive = true;
     let last = 0;
     let zeroSince = 0;
-    const id = setInterval(async () => {
-      const m = await nativeMeter().catch(() => null);
-      if (!alive || !m) return;
-      m.peaks.forEach((p, i) => {
+    return subscribeLevels(({ peaks, meter: m }) => {
+      if (!m) return;
+      peaks.forEach((p, i) => {
         const el = bars.current[i];
         if (el) el.style.width = `${Math.min(100, Math.sqrt(p) * 100)}%`;
       });
       // Una interfaz conectada siempre deja un poco de ruido: ceros exactos durante 3 s
       // significan que el driver no está conectado a ninguna entrada real.
-      if (m.peaks[0] === 0 && m.peaks[1] === 0) {
+      if (peaks[0] === 0 && peaks[1] === 0) {
         zeroSince ||= Date.now();
         setSilent(Date.now() - zeroSince > 3000);
       } else {
@@ -184,11 +183,7 @@ function NativeStatus() {
         last = Date.now();
         setMeter(m);
       }
-    }, 50);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    });
   }, []);
 
   if (!info) return null;

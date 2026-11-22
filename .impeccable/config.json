@@ -1,0 +1,23 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-11-22T01:36:49.204Z",
+        "reason": "Geist is the app's existing typeface (src/index.css); the landing inherits it on purpose. Decided by the assistant, not user confirmed."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "landing/index.html"
+        ],
+        "createdAt": "2026-11-22T01:36:49.308Z",
+        "reason": "Flagged boxes are the interface mockup (.frame/.m-bar), a screenshot-like illustration whose children sit flush on purpose; fixed-height bars center their content. Decided by the assistant, not user confirmed."
+      }
+    ]
+  }
+}
