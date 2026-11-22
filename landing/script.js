@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const REPO = "jhonadanil/Riff";
+  const REPO = "jhonadanil/riff-studio";
 
   // ---------- Tema ----------
   const root = document.documentElement;

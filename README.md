@@ -1,4 +1,4 @@
-# Riff
+# Riff Studio
 
 DAW de escritorio enfocado en rock: amplis, pedales y batería gratis integrados, inspirado en Reaper, con IA en el futuro.
 

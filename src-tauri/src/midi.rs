@@ -87,7 +87,7 @@ fn parse(bytes: &[u8]) -> Option<MidiEvent> {
 
 #[tauri::command(async)]
 pub fn midi_ports() -> Result<Vec<Port>, String> {
-    let input = MidiInput::new("Riff").map_err(|e| e.to_string())?;
+    let input = MidiInput::new("Riff Studio").map_err(|e| e.to_string())?;
     Ok(input.ports().iter().filter_map(|p| input.port_name(p).ok()).map(|name| Port { name }).collect())
 }
 
@@ -118,7 +118,7 @@ pub fn midi_connect(midi: tauri::State<'_, Midi>, plugins: tauri::State<'_, Plug
 }
 
 fn open(midi: &Midi, plugins: &PluginHost, name: &str) -> Result<MidiInputConnection<()>, String> {
-    let input = MidiInput::new("Riff").map_err(|e| e.to_string())?;
+    let input = MidiInput::new("Riff Studio").map_err(|e| e.to_string())?;
     let p = input
         .ports()
         .into_iter()

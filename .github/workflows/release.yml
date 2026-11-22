@@ -33,7 +33,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Riff ${{ github.ref_name }}
+          releaseName: Riff Studio ${{ github.ref_name }}
           releaseBody: Instalador para Windows 10 y 11 de 64 bits.
           releaseDraft: false
           prerelease: false

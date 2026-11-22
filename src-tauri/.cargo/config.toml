@@ -1,5 +1,5 @@
-# The project path has an accent ("app-musica" with u-acute) and the ASIO build
-# (asio-sys/bindgen) breaks on it, so compile into a plain-ASCII folder.
+# The project used to live in a path with an accent ("app-musica" with u-acute) and
+# the ASIO build (asio-sys/bindgen) broke on it, so we compile into a plain-ASCII folder.
 [build]
 target-dir = "C:/Users/jhony/.riff-target"
 
