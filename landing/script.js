@@ -43,7 +43,7 @@
   const BPM = 120;
   const BEAT = 60 / BPM;
   const TRACKS = [
-    { name: "Guitarra", color: "#cba6f7", armed: true, clips: [{ s: 0, e: 5, n: "Riff A", d: 0.55, seed: 3 }] },
+    { name: "Guitarra", color: "#cba6f7", armed: true, chain: ["Overdrive", "Ampli"], clips: [{ s: 0, e: 5, n: "Riff A", d: 0.55, seed: 3 }] },
     { name: "Bajo", color: "#89b4fa", clips: [{ s: 0, e: 14.4, n: "Bajo", d: 0.42, seed: 11 }] },
     { name: "Batería", color: "#a6e3a1", clips: [{ s: 0, e: 16, n: "Batería", d: 0.8, seed: 7, punchy: true }] },
     { name: "Voz", color: "#fab387", clips: [{ s: 6.4, e: 14.4, n: "Voz", d: 0.5, seed: 19 }] },
@@ -96,7 +96,7 @@
   for (const t of TRACKS) {
     const row = document.createElement("div");
     row.className = "m-track";
-    row.innerHTML = `<div class="m-head"><i style="background:${t.color}"></i><span class="m-name">${t.name}</span><u>M</u><u>S</u><u class="${t.armed ? "is-armed" : ""}">R</u></div>`;
+    row.innerHTML = `<div class="m-head"><i style="background:${t.color}"></i><span class="m-id"><span class="m-name">${t.name}</span>${t.chain ? `<span class="m-chain">${t.chain.map((c) => `<span>${c}</span>`).join("")}</span>` : ""}</span><u>M</u><u>S</u><u class="${t.armed ? "is-armed" : ""}">R</u></div>`;
     const lane = document.createElement("div");
     lane.className = "m-lane";
     for (const c of t.clips) lane.appendChild(clipEl(t, c));
@@ -111,7 +111,7 @@
   const strip = (name, color, extra = "") => {
     const el = document.createElement("div");
     el.className = `m-strip ${extra}`;
-    el.innerHTML = `<div class="m-pan"></div><div class="m-fader"><div class="m-track-bar"><div class="m-thumb" style="top:${18 + Math.random() * 0}%"></div></div><div class="m-meter"><i><b></b></i><i><b></b></i></div></div><span class="m-sname" style="color:${color}">${name}</span>`;
+    el.innerHTML = `<div class="m-pan"></div><div class="m-fader"><div class="m-track-bar"><div class="m-thumb" style="top:18%"></div></div><div class="m-meter"><i><b></b></i><i><b></b></i></div></div><span class="m-sname" style="color:${color}">${name}</span>`;
     mixer.appendChild(el);
     return [...el.querySelectorAll(".m-meter b")];
   };
@@ -120,9 +120,9 @@
 
   // ---------- Escala: la maqueta mide 1040 px lógicos y se ajusta al ancho disponible ----------
   const fit = () => {
-    const k = frame.clientWidth / 1040;
-    mock.style.transform = `scale(${k})`;
-    frame.style.height = `${mock.offsetHeight * k}px`;
+    // Nunca más pequeña que 0,62: por debajo el texto no se lee, y en su lugar se desliza con el dedo
+    const k = Math.max(0.62, frame.clientWidth / 1040);
+    mock.style.zoom = String(k);
   };
   new ResizeObserver(fit).observe(frame);
   fit();
@@ -273,7 +273,7 @@
 
   addEventListener("keydown", (e) => {
     if (e.altKey || e.repeat) return;
-    if (e.target instanceof HTMLElement && e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
+    if (e.target instanceof HTMLElement && e.target.closest("input, textarea, select, button, a, [role=button], [contenteditable]")) return;
     const cap = capFor(e);
     cap?.classList.add("is-down");
     const key = e.key.toLowerCase();
@@ -289,15 +289,28 @@
   addEventListener("keyup", (e) => capFor(e)?.classList.remove("is-down"));
   addEventListener("blur", () => caps.forEach((c) => c.classList.remove("is-down")));
   // También se pueden pulsar con el ratón o el dedo
+  const press = (c) => {
+    const k = c.dataset.key;
+    if (k === "r") toggleRec();
+    else if (k === " ") togglePlay();
+    else if (k === "m") state.metro = !state.metro;
+    else if (k === "l") state.loop = !state.loop;
+  };
   caps.forEach((c) => {
+    c.tabIndex = 0;
+    c.setAttribute("role", "button");
+    c.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      c.classList.add("is-down");
+      press(c);
+    });
+    c.addEventListener("keyup", () => c.classList.remove("is-down"));
     c.addEventListener("pointerdown", () => c.classList.add("is-down"));
     c.addEventListener("pointerup", () => {
       c.classList.remove("is-down");
-      const k = c.dataset.key;
-      if (k === "r") toggleRec();
-      else if (k === " ") togglePlay();
-      else if (k === "m") state.metro = !state.metro;
-      else if (k === "l") state.loop = !state.loop;
+      press(c);
     });
     c.addEventListener("pointerleave", () => c.classList.remove("is-down"));
   });
