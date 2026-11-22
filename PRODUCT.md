@@ -12,7 +12,7 @@ web
 Músicos aficionados —guitarristas y bandas de rock— que quieren grabar en casa sin pelearse con un DAW complicado. La app es pública y gratuita.
 
 ## Product Purpose
-Riff es un DAW para grabar, editar y mezclar rock en casa. Tiene que ser a la vez simple y rápido (enchufar la guitarra y grabar una idea en segundos sin perderse en menús) y traer de serie lo que el rock necesita: amplis, pedales y batería, sin tener que buscar plugins.
+Riff Studio es un DAW para grabar, editar y mezclar rock en casa. Tiene que ser a la vez simple y rápido (enchufar la guitarra y grabar una idea en segundos sin perderse en menús) y traer de serie lo que el rock necesita: amplis, pedales y batería, sin tener que buscar plugins.
 
 ## Positioning
 Un DAW centrado en el rock y pensado para aficionados: menos opciones que un DAW generalista y todo lo necesario para el rock incluido de serie.
@@ -31,7 +31,7 @@ Entrada de audio a través de una tarjeta o interfaz USB, normalmente con la gui
 - Stack: Tauri 2, React, Tailwind v4, shadcn/ui, Zustand y Tone.js.
 
 ## Brand Commitments
-- Nombre: **Riff**.
+- Nombre: **Riff Studio** (antes «Riff»; el repositorio y la extensión de proyecto `.riff` se mantienen).
 - El usuario pidió una apariencia minimalista y monocroma, tomando como referencia la interfaz de escritorio de Ollama, con modo claro y modo oscuro. Sirve de referencia de estilo, no de marca: no se copian su logotipo ni su identidad.
 
 ## Evidence on Hand

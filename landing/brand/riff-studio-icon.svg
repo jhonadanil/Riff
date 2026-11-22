@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="t">
+  <title id="t">Riff Studio</title>
+  <rect width="1024" height="1024" rx="0.0" fill="#17191F"/>
+  <g>
+    <rect x="126.98" y="432.13" width="83.97" height="159.74" rx="41.98" fill="#A78BFA"/>
+    <rect x="264.19" y="341.61" width="83.97" height="340.79" rx="41.98" fill="#A78BFA"/>
+    <rect x="401.41" y="245.76" width="83.97" height="532.48" rx="41.98" fill="#A78BFA"/>
+    <rect x="538.62" y="373.56" width="83.97" height="276.89" rx="41.98" fill="#A78BFA"/>
+    <rect x="675.84" y="288.36" width="83.97" height="447.28" rx="41.98" fill="#A78BFA"/>
+    <rect x="813.06" y="442.78" width="83.97" height="138.44" rx="41.98" fill="#A78BFA"/>
+  </g>
+</svg>

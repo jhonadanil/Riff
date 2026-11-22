@@ -10,7 +10,7 @@ export function useAppWindow() {
   const dirty = useProject((s) => s.dirty);
 
   useEffect(() => {
-    const title = `${dirty ? "• " : ""}${projectName(projectPath)} — Riff`;
+    const title = `${dirty ? "• " : ""}${projectName(projectPath)} — Riff Studio`;
     document.title = title;
     if (isTauri()) getCurrentWindow().setTitle(title).catch(console.error);
   }, [projectPath, dirty]);

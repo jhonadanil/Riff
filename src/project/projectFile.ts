@@ -55,7 +55,7 @@ export async function confirmDiscard(): Promise<boolean> {
   const { dirty, projectPath } = useProject.getState();
   if (!dirty) return true;
   const answer = await message(`¿Guardar los cambios de «${projectName(projectPath)}» antes de continuar?`, {
-    title: "Riff",
+    title: "Riff Studio",
     kind: "warning",
     buttons: { yes: "Guardar", no: "No guardar", cancel: "Cancelar" },
   });
@@ -80,14 +80,14 @@ export async function openProject(path?: string) {
   if (!(await confirmDiscard())) return;
   const chosen =
     path ??
-    (await open({ title: "Abrir proyecto", filters: [{ name: "Proyecto de Riff", extensions: ["riff"] }] }));
+    (await open({ title: "Abrir proyecto", filters: [{ name: "Proyecto de Riff Studio", extensions: ["riff"] }] }));
   if (typeof chosen !== "string") return;
 
   const id = toast.loading(`Abriendo «${projectName(chosen)}»…`);
   try {
     const file = JSON.parse(await readTextFile(chosen)) as RiffFile;
-    if (file.format !== "riff") throw new Error("No es un proyecto de Riff");
-    if (file.version > FORMAT_VERSION) throw new Error("El proyecto es de una versión más nueva de Riff");
+    if (file.format !== "riff") throw new Error("No es un proyecto de Riff Studio");
+    if (file.version > FORMAT_VERSION) throw new Error("El proyecto es de una versión más nueva de Riff Studio");
 
     const audioDir = await join(await dirname(chosen), AUDIO_DIR);
     const missing: string[] = [];
@@ -144,7 +144,7 @@ export async function saveProjectAs(): Promise<boolean> {
   const path = await save({
     title: "Guardar proyecto",
     defaultPath: `${projectName(useProject.getState().projectPath)}.riff`,
-    filters: [{ name: "Proyecto de Riff", extensions: ["riff"] }],
+    filters: [{ name: "Proyecto de Riff Studio", extensions: ["riff"] }],
   });
   if (!path) return false;
   return writeProject(path.toLowerCase().endsWith(".riff") ? path : `${path}.riff`);

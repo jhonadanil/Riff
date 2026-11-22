@@ -62,7 +62,7 @@ export function TransportBar() {
     <header className="grid h-16 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b px-4">
       {/* Izquierda: proyecto */}
       <div className="flex min-w-0 items-center gap-2">
-        <span className="pr-1 pl-1 text-[17px] font-semibold tracking-[-0.02em]">Riff</span>
+        <span className="pr-1 pl-1 text-[17px] font-semibold tracking-[-0.02em]">Riff Studio</span>
         <FileMenu onImportAudio={() => fileInput.current?.click()} />
         <span className="min-w-0 truncate text-sm text-muted-foreground" title={s.projectPath ?? undefined}>
           {projectName(s.projectPath)}
