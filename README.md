@@ -2,6 +2,8 @@
 
 DAW de escritorio enfocado en rock: amplis, pedales y batería gratis integrados, inspirado en Reaper, con IA en el futuro.
 
+**Web:** https://jhonadanil.github.io/riff-studio/ · **Descargar:** https://github.com/jhonadanil/riff-studio/releases/latest
+
 ## Stack
 
 | Capa | Tecnología | Para qué |
