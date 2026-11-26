@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { refreshChains } from "@/audio/chains";
 import { useNative } from "@/audio/native";
 import { cn } from "@/lib/utils";
+import { markPluginsChanged } from "@/project/recovery";
 
 type Slot = {
   id: number;
@@ -47,6 +48,8 @@ export function PluginChain({ trackId }: { trackId: string }) {
     setError(null);
     try {
       await fn();
+      // Buscar plugins o abrir su ventana no cambia el proyecto
+      if (label !== "scan" && !label.startsWith("editor-")) markPluginsChanged();
     } catch (e) {
       setError(String(e));
     } finally {

@@ -69,6 +69,12 @@ async function offerRestore() {
   return true;
 }
 
+/** Ha cambiado algo de los plugins (se guardan en el proyecto pero viven en el motor). */
+export function markPluginsChanged() {
+  useProject.setState({ dirty: true });
+  pending = true;
+}
+
 let started = false;
 
 export function startRecovery() {
