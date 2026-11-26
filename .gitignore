@@ -25,3 +25,6 @@ dist-ssr
 
 # Claude Code (ajustes locales)
 .claude/settings.local.json
+
+# Roadmap privado: solo en local
+ROADMAP.md
