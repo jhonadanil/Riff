@@ -1,0 +1,24 @@
+Riff Studio — Licencia propietaria
+Copyright (c) 2026 jhonadanil. Todos los derechos reservados.
+
+1. Código fuente
+   Este repositorio es público solo para poder consultarlo. No se concede permiso para
+   copiar, modificar, distribuir, sublicenciar, vender ni crear obras derivadas del código,
+   el diseño, el nombre, el logotipo o cualquier otro contenido de Riff Studio, salvo
+   autorización previa y por escrito del titular. Los términos de servicio de GitHub siguen
+   permitiendo ver el repositorio y hacer un «fork» dentro de GitHub.
+
+2. Aplicación
+   Se permite descargar, instalar y usar gratis las versiones oficiales de Riff Studio
+   publicadas por el titular, también con fines comerciales para la música que hagas con
+   ellas. Tus grabaciones, proyectos y canciones son tuyos. No se permite redistribuir,
+   revender ni modificar la aplicación o su instalador.
+
+3. Componentes de terceros
+   Los componentes de terceros incluidos o usados por el proyecto (por ejemplo
+   src-tauri/vendor/vst3-host, licencia MIT) conservan sus propias licencias, que
+   prevalecen sobre este texto en lo que les afecte.
+
+4. Sin garantía
+   El software se ofrece «tal cual», sin garantías de ningún tipo. En la medida en que la
+   ley lo permita, el titular no responde de daños derivados de su uso.

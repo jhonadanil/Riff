@@ -4,6 +4,10 @@ DAW de escritorio enfocado en rock: amplis, pedales y batería gratis integrados
 
 **Web:** https://jhonadanil.github.io/riff-studio/ · **Descargar:** https://github.com/jhonadanil/riff-studio/releases/latest
 
+## Licencia
+
+Software propietario, con todos los derechos reservados: la app es gratuita, pero el código no es de uso libre. Ver [LICENSE](LICENSE).
+
 ## Stack
 
 | Capa | Tecnología | Para qué |
@@ -22,12 +26,12 @@ DAW de escritorio enfocado en rock: amplis, pedales y batería gratis integrados
 
 ```
 src/
-  audio/        motor de audio (hoy Tone.js; mañana puente a Rust)
+  audio/        audio en la interfaz (Tone.js) y puente con el motor nativo
   components/ui componentes shadcn
   features/     transport, tracks, mixer...
   plugins/      UIs de amplis, pedales y batería
   store/        estado global (Zustand)
-src-tauri/      backend Rust de Tauri
+src-tauri/      backend Rust de Tauri: motor de audio y plugins
 ```
 
 ## Comandos

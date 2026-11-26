@@ -1,6 +1,7 @@
 {
   "name": "riff-studio",
   "private": true,
+  "license": "UNLICENSED",
   "version": "0.1.4",
   "type": "module",
   "scripts": {
