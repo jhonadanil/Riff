@@ -35,6 +35,8 @@ pub fn run() {
             plugins::plugin_prune,
             plugins::plugin_snapshot,
             plugins::plugin_restore,
+            plugins::plugin_snapshot_track,
+            plugins::plugin_apply,
             plugins::plugin_set_monitored,
             plugins::midi_set_clips,
             plugins::midi_set_mix,

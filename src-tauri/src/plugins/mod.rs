@@ -139,6 +139,10 @@ enum Cmd {
     Prune(Vec<String>, Reply<()>),
     Snapshot(Reply<HashMap<String, Vec<Saved>>>),
     Restore(HashMap<String, Vec<Saved>>, Reply<Vec<String>>),
+    /// Los plugins de una sola pista (para guardarlos en una plantilla de pista).
+    SnapshotTrack(String, Reply<Vec<Saved>>),
+    /// Carga plugins guardados en una pista, sin tocar el resto.
+    Apply(String, Vec<Saved>, Reply<Vec<String>>),
     Render(String, Vec<NoteIn>, f64, Reply<Vec<u8>>),
 }
 
@@ -270,6 +274,30 @@ impl Worker {
             }
             Cmd::Render(track, notes, duration, r) => {
                 let _ = r.send(self.render(&track, &notes, duration));
+            }
+            Cmd::SnapshotTrack(track, r) => {
+                let out = self
+                    .entries
+                    .iter()
+                    .filter(|e| e.track == track)
+                    .map(|e| Saved {
+                        path: e.info.path.clone(),
+                        bypass: e.bypass.load(Ordering::Relaxed),
+                        state: e.plugin.lock().ok().and_then(|p| p.save_state().ok()).map(|s| to_hex(&s)).unwrap_or_default(),
+                    })
+                    .collect();
+                let _ = r.send(Ok(out));
+            }
+            Cmd::Apply(track, list, r) => {
+                let mut errors = Vec::new();
+                for s in list {
+                    let state = from_hex(&s.state);
+                    let st = (!state.is_empty()).then_some(state.as_slice());
+                    if let Err(e) = self.load(&track, &s.path, st, s.bypass) {
+                        errors.push(format!("{}: {e}", s.path));
+                    }
+                }
+                let _ = r.send(Ok(errors));
             }
             Cmd::Restore(map, r) => {
                 let ids: Vec<u32> = self.entries.iter().map(|e| e.info.id).collect();
@@ -549,6 +577,18 @@ pub fn plugin_snapshot(host: tauri::State<'_, PluginHost>) -> Result<HashMap<Str
 #[tauri::command(async)]
 pub fn plugin_restore(host: tauri::State<'_, PluginHost>, chains: HashMap<String, Vec<Saved>>) -> Result<Vec<String>, String> {
     host.call(|r| Cmd::Restore(chains, r))
+}
+
+/// Plugins (con su estado) de una pista, para guardarlos en una plantilla.
+#[tauri::command(async)]
+pub fn plugin_snapshot_track(host: tauri::State<'_, PluginHost>, track: String) -> Result<Vec<Saved>, String> {
+    host.call(|r| Cmd::SnapshotTrack(track, r))
+}
+
+/// Carga en una pista los plugins de una plantilla. Devuelve los que no se pudieron cargar.
+#[tauri::command(async)]
+pub fn plugin_apply(host: tauri::State<'_, PluginHost>, track: String, plugins: Vec<Saved>) -> Result<Vec<String>, String> {
+    host.call(|r| Cmd::Apply(track, plugins, r))
 }
 
 /// Pistas armadas: sus instrumentos suenan al tocarlos con el controlador MIDI.

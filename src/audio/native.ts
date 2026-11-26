@@ -100,16 +100,37 @@ export const useNative = create<NativeState>((set) => ({
 
 // --- Dispositivos -----------------------------------------------------------------
 
-export async function refreshNativeDevices() {
+/**
+ * Lee los sistemas de audio y sus dispositivos. Con `auto` (arranque, reintentos), si el sistema
+ * elegido no tiene dispositivos (p. ej. ASIO sin ningún driver instalado) salta al primero que sí los tenga;
+ * si lo acaba de elegir el usuario (`auto = false`) se respeta y se le explica qué falta.
+ */
+export async function refreshNativeDevices(auto = true) {
   if (!useNative.getState().available) return;
   try {
     const hosts = await invoke<NativeHost[]>("audio_hosts");
     const s = useNative.getState();
     // Preferir ASIO si existe: es el que da la latencia baja
-    const host = s.host && hosts.some((h) => h.id === s.host) ? s.host : (hosts.find((h) => h.id === "ASIO") ?? hosts[0])?.id ?? null;
+    let host = s.host && hosts.some((h) => h.id === s.host) ? s.host : (hosts.find((h) => h.id === "ASIO") ?? hosts[0])?.id ?? null;
     useNative.setState({ hosts, host });
     if (!host) return;
-    const devices = await invoke<NativeDevice[]>("audio_devices", { host });
+    // Si la consulta falla (p. ej. el motor está arrancando el driver) no es "sin dispositivos": se deja el error y no se cambia de sistema
+    let devices = await invoke<NativeDevice[]>("audio_devices", { host });
+    // Un driver ASIO abierto por el motor puede no dejar listarse otra vez: se conserva la lista que ya teníamos
+    if (devices.length === 0 && s.devices.length > 0 && s.host === host) devices = s.devices;
+    if (devices.length === 0 && auto) {
+      // ASIO existe siempre en Windows, aunque no haya ningún driver: probar con los demás
+      for (const h of [...hosts].sort((a, b) => Number(b.id === "WASAPI") - Number(a.id === "WASAPI"))) {
+        if (h.id === host) continue;
+        const list = await invoke<NativeDevice[]>("audio_devices", { host: h.id }).catch(() => [] as NativeDevice[]);
+        if (list.length) {
+          host = h.id;
+          devices = list;
+          useNative.setState({ host, outputHost: null, inputId: null, outputId: null });
+          break;
+        }
+      }
+    }
     const cur = useNative.getState();
     const outHost = cur.outputHost && hosts.some((h) => h.id === cur.outputHost) ? cur.outputHost : host;
     const outputDevices = outHost === host ? devices : await invoke<NativeDevice[]>("audio_devices", { host: outHost });
@@ -122,6 +143,9 @@ export async function refreshNativeDevices() {
         ? inputId
         : pick(outputDevices, cur.outputId, (d) => outHost === "ASIO" || d.outputs > 0, (d) => d.isDefaultOutput);
     useNative.setState({ devices, outputDevices, outputHost: outHost === host ? null : outHost, inputId, outputId });
+    if (devices.length > 0 && useNative.getState().status === "error" && !useNative.getState().enabled) {
+      useNative.setState({ status: "off", error: null });
+    }
     if (devices.length === 0) {
       useNative.setState({
         status: "error",
@@ -202,7 +226,7 @@ useNative.subscribe((s, prev) => {
       // sin almacenamiento
     }
   }
-  if ((s.host !== prev.host && s.host) || s.outputHost !== prev.outputHost) void refreshNativeDevices();
+  if ((s.host !== prev.host && s.host) || s.outputHost !== prev.outputHost) void refreshNativeDevices(s.host === prev.host); // cambiar solo la salida no debe dejar una entrada sin drivers atascada
 
   const config = s.outputHost !== prev.outputHost || s.inputId !== prev.inputId || s.outputId !== prev.outputId || s.bufferSize !== prev.bufferSize || s.host !== prev.host;
   if (!s.enabled && prev.enabled) void stop();

@@ -173,7 +173,8 @@ type ProjectState = {
   undo: () => void;
   redo: () => void;
 
-  addTrack: () => void;
+  /** Añade una pista (con la configuración dada, si la hay) y devuelve su id. */
+  addTrack: (init?: Partial<Omit<Track, "id">>) => string;
   removeTrack: (id: string) => void;
   updateTrack: (id: string, patch: Partial<Track>) => void;
   selectTrack: (id: string) => void;
@@ -227,17 +228,12 @@ const track = (id: string, name: string, color: string, pan = 0): Track => ({
   armed: false,
 });
 
-/** Plantilla de proyecto nuevo: las pistas típicas de una banda de rock. */
+/** Proyecto nuevo: sin pistas, se añaden con «+». */
 export function emptyProject(): ProjectData {
   return {
     bpm: 120,
     timeSig: [4, 4],
-    tracks: [
-      track(crypto.randomUUID(), "Guitarra", TRACK_COLORS[0]),
-      track(crypto.randomUUID(), "Bajo", TRACK_COLORS[1]),
-      track(crypto.randomUUID(), "Batería", TRACK_COLORS[2]),
-      track(crypto.randomUUID(), "Voz", TRACK_COLORS[3]),
-    ],
+    tracks: [],
     clips: [],
     buses: [],
     master: 1,
@@ -259,7 +255,7 @@ export const useProject = create<ProjectState>((set, get) => ({
   master: 1,
   click: readClick(),
   isPlaying: false,
-  selectedTrackId: initial.tracks[0].id,
+  selectedTrackId: initial.tracks[0]?.id ?? null,
   selectedClipId: null,
   selectedClipIds: [],
   editingClipId: null,
@@ -343,13 +339,12 @@ export const useProject = create<ProjectState>((set, get) => ({
       };
     }),
 
-  addTrack: () => {
+  addTrack: (init) => {
     get().checkpoint();
-    set((s) => {
-      const n = s.tracks.length + 1;
-      const t = track(crypto.randomUUID(), `Pista ${n}`, TRACK_COLORS[(n - 1) % TRACK_COLORS.length]);
-      return { tracks: [...s.tracks, t], selectedTrackId: t.id };
-    });
+    const n = get().tracks.length + 1;
+    const t = { ...track(crypto.randomUUID(), `Pista ${n}`, TRACK_COLORS[(n - 1) % TRACK_COLORS.length]), ...init, armed: false };
+    set((s) => ({ tracks: [...s.tracks, t], selectedTrackId: t.id }));
+    return t.id;
   },
   removeTrack: (id) => {
     get().checkpoint();

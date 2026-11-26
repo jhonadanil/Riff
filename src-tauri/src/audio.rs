@@ -687,7 +687,9 @@ where
                 } else {
                     // Mismo reloj: si se acumula audio, tirar lo sobrante (la latencia no crece de un búfer)
                     let queued = consumer.slots() / 2;
-                    if queued > frames * 2 {
+                    // (con margen para un bloque de entrada: tirar audio es un corte, suena como un "pop")
+                    let in_block = shared.in_block.load(Ordering::Relaxed) as usize;
+                    if queued > frames * 2 + in_block {
                         let drop = (queued - frames) * 2;
                         if let Ok(chunk) = consumer.read_chunk(drop) {
                             chunk.commit_all();
@@ -710,7 +712,8 @@ where
                         }
                         None => pop_frame(&mut consumer, &mut starved),
                     };
-                    let (l, r) = if monitor { (l * gain, r * gain) } else { (0.0, 0.0) };
+                    // Un amplificador saturado puede pasar de 0 dBFS: recortar aquí en vez de dejar que el driver lo haga a lo bruto
+                    let (l, r) = if monitor { ((l * gain).clamp(-1.0, 1.0), (r * gain).clamp(-1.0, 1.0)) } else { (0.0, 0.0) };
                     frame[0] = T::from_sample(l);
                     if channels > 1 {
                         frame[1] = T::from_sample(r);

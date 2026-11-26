@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Headphones, Music2, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
+import { BookmarkPlus, ClipboardPaste, Headphones, Music2, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -15,6 +15,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { addTrackFromPreset, deleteTrackPreset, saveTrackPreset, useTrackPresets } from "@/store/trackPresets";
 import { barSeconds, gridSeconds, hasClipboard, snapTime, useProject, type AutoParam, type Track } from "@/store/project";
 import * as engine from "@/audio/engine";
 import { useInput } from "@/audio/input";
@@ -123,7 +124,7 @@ export function TrackList() {
         <div className="relative">
         {tracks.map((t) => (
           <div key={t.id} className="flex border-b" style={{ height: TRACK_H }}>
-            <TrackHeader track={t} canDelete={tracks.length > 1} />
+            <TrackHeader track={t} canDelete />
 
             <ContextMenu>
               <ContextMenuTrigger asChild>
@@ -183,13 +184,52 @@ export function TrackList() {
         </div>
 
         <div className="sticky left-0 flex w-fit items-center gap-4 px-3 py-2">
-          <Button variant="ghost" size="sm" onClick={addTrack}>
-            <Plus />
-            Añadir pista
-          </Button>
+          <AddTrackMenu onEmpty={() => addTrack()} />
         </div>
       </div>
     </div>
+  );
+}
+
+/** «Añadir pista»: clic = pista vacía; clic derecho = plantillas con su entrada, MIDI y plugins ya configurados. */
+function AddTrackMenu({ onEmpty }: { onEmpty: () => void }) {
+  const presets = useTrackPresets((s) => s.list);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <Button variant="ghost" size="sm" onClick={onEmpty} title="Clic derecho: plantillas">
+          <Plus />
+          Añadir pista
+        </Button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-52">
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Añadir desde plantilla</div>
+        {presets.map((p) => (
+          <ContextMenuItem key={p.id} onSelect={() => void addTrackFromPreset(p)} className="group gap-2">
+            <span className="h-3 w-1 rounded-full" style={{ background: p.color }} />
+            <span className="flex-1">{p.name}</span>
+            {!p.builtin && (
+              <button
+                className="rounded p-0.5 opacity-0 hover:bg-foreground/10 group-hover:opacity-100"
+                title="Borrar plantilla"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  deleteTrackPreset(p.id);
+                }}
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </ContextMenuItem>
+        ))}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onEmpty}>
+          <Plus />
+          Pista vacía
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -385,6 +425,10 @@ function TrackHeader({ track: t, canDelete }: { track: Track; canDelete: boolean
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void saveTrackPreset(t.id)}>
+          <BookmarkPlus />
+          Guardar como plantilla
+        </ContextMenuItem>
         <ContextMenuItem variant="destructive" disabled={!canDelete} onSelect={() => removeTrack(t.id)}>
           <Trash2 />
           Eliminar pista

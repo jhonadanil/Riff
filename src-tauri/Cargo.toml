@@ -43,6 +43,9 @@ cpal = "0.18.2"
 # cpal 0.18.2 (ASIO) suma timestamps que pueden desbordar; en debug eso hace
 # panic dentro del callback de ASIO y mata el proceso. En release simplemente
 # da la vuelta, así que se desactivan los overflow-checks solo para cpal.
+[patch.crates-io]
+vst3-host = { path = "vendor/vst3-host" }
+
 [profile.dev.package.cpal]
 overflow-checks = false
 
