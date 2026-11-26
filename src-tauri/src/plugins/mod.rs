@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use vst3_host::{AudioBuffers, MidiEvent, Plugin, PluginWindow, Vst3Host};
 
 pub use chain::{Chain, NoteIn, Scratch};
+use chain::{Stem, TrackMix};
 use chain::{build_events, wav_f32, Slot, MAX_BLOCK};
 
 /// Los plugins con ventana esperan COM de un hilo con interfaz (apartamento de un solo hilo).
@@ -126,6 +127,16 @@ fn is_installed_vst3(path: &str) -> bool {
 
 // --- Hilo de plugins ----------------------------------------------------------------------
 
+/// Cola que se deja sonar al final de un renderizado (reverbs, ecos), en segundos.
+const TAIL: f64 = 2.0;
+
+/// Un plugin de la cadena durante un renderizado sin tiempo real.
+struct Offline {
+    plugin: Arc<Mutex<Plugin>>,
+    bypass: Arc<AtomicBool>,
+    instrument: bool,
+}
+
 type Reply<T> = mpsc::Sender<Result<T, String>>;
 
 enum Cmd {
@@ -144,6 +155,8 @@ enum Cmd {
     /// Carga plugins guardados en una pista, sin tocar el resto.
     Apply(String, Vec<Saved>, Reply<Vec<String>>),
     Render(String, Vec<NoteIn>, f64, Reply<Vec<u8>>),
+    /// Pasa el audio de una pista (estéreo intercalado) por sus efectos sin tiempo real.
+    Process(String, Vec<f32>, Reply<Vec<u8>>),
 }
 
 pub struct PluginHost {
@@ -275,6 +288,9 @@ impl Worker {
             Cmd::Render(track, notes, duration, r) => {
                 let _ = r.send(self.render(&track, &notes, duration));
             }
+            Cmd::Process(track, input, r) => {
+                let _ = r.send(self.process_offline(&track, &input));
+            }
             Cmd::SnapshotTrack(track, r) => {
                 let out = self
                     .entries
@@ -331,7 +347,10 @@ impl Worker {
             .output_channels(2)
             .build()
             .map_err(|e| e.to_string())?;
-        let mut plugin = host.load_plugin(path).map_err(|e| format!("No se pudo cargar el plugin: {e}"))?;
+        let mut plugin = host.load_plugin(path).map_err(|e| {
+            crate::logfile::write(format!("[plugins] no se pudo cargar {path}: {e}"));
+            format!("No se pudo cargar el plugin: {e}")
+        })?;
         if let Some(st) = state {
             let _ = plugin.load_state(st);
         }
@@ -363,17 +382,59 @@ impl Worker {
         Ok(info)
     }
 
-    /// Toca las notas de una pista por su cadena de plugins sin tiempo real y devuelve el audio (WAV).
-    /// Usa los mismos plugins que suenan en vivo: mientras dura, el audio en vivo se aparta.
+    /// Los plugins de una pista, en orden.
+    fn slots_of(&self, track: &str) -> Result<Vec<Offline>, String> {
+        let tracks = self.chain.tracks.lock().unwrap();
+        let slots = tracks.get(track).ok_or("La pista no tiene plugins")?;
+        Ok(slots.iter().map(|s| Offline { plugin: s.plugin.clone(), bypass: s.bypass.clone(), instrument: s.instrument }).collect())
+    }
+
+    /// Toca las notas de una pista por su instrumento sin tiempo real y devuelve el audio (WAV).
     fn render(&mut self, track: &str, notes: &[NoteIn], duration: f64) -> Result<Vec<u8>, String> {
-        let plugins: Vec<(Arc<Mutex<Plugin>>, Arc<AtomicBool>)> = {
-            let tracks = self.chain.tracks.lock().unwrap();
-            let slots = tracks.get(track).ok_or("La pista no tiene plugins")?;
-            if !slots.first().is_some_and(|s| s.instrument) {
-                return Err("La pista no tiene un instrumento".into());
+        let slots = self.slots_of(track)?;
+        if !slots.first().is_some_and(|s| s.instrument) {
+            return Err("La pista no tiene un instrumento".into());
+        }
+        let events = build_events(notes);
+        let mut next = 0usize;
+        let length = |rate: f64| ((duration + TAIL) * rate) as usize;
+        self.offline(&slots, &[], length, |first, at, n, rate| {
+            let (t0, t1) = (at as f64 / rate, (at + n) as f64 / rate);
+            while next < events.len() && events[next].t < t1 {
+                let e = events[next];
+                next += 1;
+                let channel = vst3_host::MidiChannel::from_index(e.ch).unwrap_or(vst3_host::MidiChannel::Ch1);
+                let ev = if e.on {
+                    MidiEvent::NoteOn { channel, note: e.note, velocity: e.vel }
+                } else {
+                    MidiEvent::NoteOff { channel, note: e.note, velocity: 0 }
+                };
+                let offset = (((e.t - t0).max(0.0) * rate) as i32).clamp(0, n as i32 - 1);
+                let _ = first.send_midi_event_at(ev, offset);
             }
-            slots.iter().map(|s| (s.plugin.clone(), s.bypass.clone())).collect()
-        };
+        })
+    }
+
+    /// Pasa el audio de una pista por sus efectos sin tiempo real y devuelve el resultado (WAV).
+    /// `input` va a la frecuencia de los plugins (`plugin_rate`).
+    fn process_offline(&mut self, track: &str, input: &[f32]) -> Result<Vec<u8>, String> {
+        let slots = self.slots_of(track)?;
+        if slots.first().is_some_and(|s| s.instrument) {
+            return Err("La pista lleva un instrumento, no efectos".into());
+        }
+        let length = |rate: f64| input.len() / 2 + (TAIL * rate) as usize;
+        self.offline(&slots, input, length, |_, _, _, _| {})
+    }
+
+    /// Recorre una cadena por bloques sin tiempo real. Usa los mismos plugins que suenan en vivo:
+    /// mientras dura, el audio en vivo se aparta. `feed` prepara cada bloque en el primer plugin.
+    fn offline(
+        &mut self,
+        slots: &[Offline],
+        input: &[f32],
+        length: impl Fn(f64) -> usize,
+        mut feed: impl FnMut(&mut Plugin, usize, usize, f64),
+    ) -> Result<Vec<u8>, String> {
         // Se apaga sola al salir, también si un plugin hace panic a mitad
         struct ExportGuard<'a>(&'a AtomicBool);
         impl Drop for ExportGuard<'_> {
@@ -385,64 +446,52 @@ impl Worker {
         let _guard = ExportGuard(&self.chain.exporting);
         // Dar tiempo a que el callback en vuelo termine antes de tocar los plugins
         thread::sleep(Duration::from_millis(50));
-        let result = (|| {
-            let mut guards: Vec<std::sync::MutexGuard<'_, Plugin>> =
-                plugins.iter().map(|(p, _)| p.lock().unwrap_or_else(|e| e.into_inner())).collect();
-            let rate = guards[0].sample_rate();
+        let mut guards: Vec<std::sync::MutexGuard<'_, Plugin>> =
+            slots.iter().map(|s| s.plugin.lock().unwrap_or_else(|e| e.into_inner())).collect();
+        let instrument = slots.first().ok_or("La pista no tiene plugins")?.instrument;
+        let rate = guards[0].sample_rate();
+        if instrument {
             let _ = guards[0].midi_panic();
-            let events = build_events(notes);
-            const BLOCK: usize = 512;
-            let total = ((duration + 2.0) * rate) as usize;
-            let mut bufs = AudioBuffers::new(2, 2, BLOCK, rate);
-            let (mut left, mut right) = (Vec::with_capacity(total), Vec::with_capacity(total));
-            let mut next = 0usize;
-            let mut at = 0usize;
-            let mut blocks = 0usize;
-            while at < total {
-                // Las ventanas de los plugins no se quedan congeladas durante una exportación larga
-                blocks += 1;
-                if blocks % 32 == 0 {
-                    pump_os_messages();
-                }
-                let n = BLOCK.min(total - at);
-                let (t0, t1) = (at as f64 / rate, (at + n) as f64 / rate);
-                while next < events.len() && events[next].t < t1 {
-                    let e = events[next];
-                    next += 1;
-                    let channel = vst3_host::MidiChannel::from_index(e.ch).unwrap_or(vst3_host::MidiChannel::Ch1);
-                    let ev = if e.on {
-                        MidiEvent::NoteOn { channel, note: e.note, velocity: e.vel }
-                    } else {
-                        MidiEvent::NoteOff { channel, note: e.note, velocity: 0 }
-                    };
-                    let offset = (((e.t - t0).max(0.0) * rate) as i32).clamp(0, n as i32 - 1);
-                    let _ = guards[0].send_midi_event_at(ev, offset);
-                }
-                for c in 0..2 {
-                    bufs.inputs[c].clear();
-                    bufs.inputs[c].resize(n, 0.0);
-                }
-                for (i, g) in guards.iter_mut().enumerate() {
-                    if plugins[i].1.load(Ordering::Relaxed) {
-                        continue;
-                    }
-                    for ch in bufs.outputs.iter_mut() {
-                        ch.clear();
-                        ch.resize(n, 0.0);
-                    }
-                    bufs.block_size = n;
-                    if g.process_audio(&mut bufs).is_ok() {
-                        std::mem::swap(&mut bufs.inputs, &mut bufs.outputs);
-                    }
-                }
-                left.extend_from_slice(&bufs.inputs[0]);
-                right.extend_from_slice(&bufs.inputs[1]);
-                at += n;
+        }
+        const BLOCK: usize = 512;
+        let total = length(rate);
+        let mut bufs = AudioBuffers::new(2, 2, BLOCK, rate);
+        let (mut left, mut right) = (Vec::with_capacity(total), Vec::with_capacity(total));
+        let mut at = 0usize;
+        let mut blocks = 0usize;
+        while at < total {
+            // Las ventanas de los plugins no se quedan congeladas durante una exportación larga
+            blocks += 1;
+            if blocks % 32 == 0 {
+                pump_os_messages();
             }
+            let n = BLOCK.min(total - at);
+            feed(&mut guards[0], at, n, rate);
+            for c in 0..2 {
+                bufs.inputs[c].clear();
+                bufs.inputs[c].extend((at..at + n).map(|i| input.get(i * 2 + c).copied().unwrap_or(0.0)));
+            }
+            for (i, g) in guards.iter_mut().enumerate() {
+                if slots[i].bypass.load(Ordering::Relaxed) {
+                    continue;
+                }
+                for ch in bufs.outputs.iter_mut() {
+                    ch.clear();
+                    ch.resize(n, 0.0);
+                }
+                bufs.block_size = n;
+                if g.process_audio(&mut bufs).is_ok() {
+                    std::mem::swap(&mut bufs.inputs, &mut bufs.outputs);
+                }
+            }
+            left.extend_from_slice(&bufs.inputs[0]);
+            right.extend_from_slice(&bufs.inputs[1]);
+            at += n;
+        }
+        if instrument {
             let _ = guards[0].midi_panic();
-            Ok(wav_f32(&left, &right, rate as u32))
-        })();
-        result
+        }
+        Ok(wav_f32(&left, &right, rate as u32))
     }
 
     fn remove(&mut self, id: u32) {
@@ -489,7 +538,10 @@ impl Worker {
                 return Ok(());
             }
             let mut w = PluginWindow::new(e.plugin.clone());
-            w.open().map_err(|e| format!("No se pudo abrir la ventana del plugin: {e}"))?;
+            w.open().map_err(|err| {
+                crate::logfile::write(format!("[plugins] ventana de {}: {err}", e.info.name));
+                format!("No se pudo abrir la ventana del plugin: {err}")
+            })?;
             e.window = Some(w);
             e.info.editor_open = true;
         } else if let Some(mut w) = e.window.take() {
@@ -611,9 +663,9 @@ pub fn midi_set_clips(host: tauri::State<'_, PluginHost>, clips: HashMap<String,
     host.chain.set_clips(clips);
 }
 
-/// Volumen y audibilidad (mute/solo) de cada pista, para los instrumentos que suenan con la canción.
+/// Volumen, audibilidad (mute/solo) y panorama de cada pista que suena por el motor nativo.
 #[tauri::command(async)]
-pub fn midi_set_mix(host: tauri::State<'_, PluginHost>, mix: HashMap<String, (f32, bool)>) {
+pub fn midi_set_mix(host: tauri::State<'_, PluginHost>, mix: HashMap<String, TrackMix>) {
     host.chain.set_mix(mix);
 }
 
@@ -644,6 +696,45 @@ pub fn plugin_render(
     duration: f64,
 ) -> Result<tauri::ipc::Response, String> {
     host.call_for(Duration::from_secs(900), |r| Cmd::Render(track, clips, duration, r)).map(tauri::ipc::Response::new)
+}
+
+/// Frecuencia a la que trabajan los plugins (la del motor, si se ha arrancado).
+#[tauri::command(async)]
+pub fn plugin_rate(host: tauri::State<'_, PluginHost>) -> f64 {
+    host.chain.rate()
+}
+
+/// Lo que llega en una orden que manda audio: la pista (cabecera `x-track`) y el cuerpo binario
+/// (f32 estéreo intercalado).
+fn audio_body(request: &tauri::ipc::Request<'_>) -> Result<(String, Vec<f32>), String> {
+    let track = request.headers().get("x-track").and_then(|v| v.to_str().ok()).ok_or("Falta la pista")?.to_string();
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Falta el audio".into()) };
+    let data = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    Ok((track, data))
+}
+
+/// Entrega el audio de una pista para que suene por sus efectos al reproducir (vacío = retirarlo).
+/// La cabecera `x-rate` indica su frecuencia.
+#[tauri::command(async)]
+pub fn track_set_audio(host: tauri::State<'_, PluginHost>, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let (track, data) = audio_body(&request)?;
+    let rate = request.headers().get("x-rate").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<f64>().ok());
+    let stem = match rate {
+        Some(rate) if !data.is_empty() && rate > 0.0 => Some(Stem { data, rate }),
+        _ => None,
+    };
+    host.chain.set_stem(track, stem);
+    Ok(())
+}
+
+/// Renderiza el audio de una pista con sus efectos (para exportar la mezcla). Devuelve un WAV.
+#[tauri::command(async)]
+pub fn plugin_process(
+    host: tauri::State<'_, PluginHost>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<tauri::ipc::Response, String> {
+    let (track, data) = audio_body(&request)?;
+    host.call_for(Duration::from_secs(900), |r| Cmd::Process(track, data, r)).map(tauri::ipc::Response::new)
 }
 
 /// Entrada de cada pista (0 = entrada 1, 1 = entrada 2, 2 = las dos en estéreo).

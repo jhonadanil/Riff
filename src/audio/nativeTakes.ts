@@ -121,7 +121,7 @@ export async function finishWet(stopTime: number) {
   const length = Math.max(0, stopTime - takes.startTime);
   const view = new DataView(bytes);
   const ctx = Tone.getContext();
-  const out: { trackId: string; buffer: AudioBuffer }[] = [];
+  const out: { trackId: string; buffer: AudioBuffer; fx: boolean }[] = [];
   let off = 0;
   const count = view.getUint32(off, true);
   off += 4;
@@ -153,7 +153,7 @@ export async function finishWet(stopTime: number) {
       l[k] = data[j * 2];
       if (r) r[k] = data[j * 2 + 1];
     }
-    out.push({ trackId, buffer });
+    out.push({ trackId, buffer, fx: wetMode.get(trackId) === true });
   }
   wetMode.clear();
   return out;

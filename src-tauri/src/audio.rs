@@ -235,11 +235,9 @@ impl Engine {
     }
 }
 
-/// Traza con tiempo para diagnosticar drivers (sale en la terminal de `tauri dev`).
+/// Traza para diagnosticar drivers (va al archivo de registro).
 fn log(msg: impl std::fmt::Display) {
-    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    let t = T0.get_or_init(std::time::Instant::now).elapsed();
-    eprintln!("[audio {:>8.3}s] {msg}", t.as_secs_f32());
+    crate::logfile::write(format!("[audio] {msg}"));
 }
 
 fn audio_thread(
@@ -284,7 +282,10 @@ fn audio_thread(
                     *info.lock().unwrap() = Some(i.clone());
                     i
                 });
-                log(format!("arrancar: {:?}", result.as_ref().map(|_| "ok")));
+                match &result {
+                    Ok(_) => log("arrancar: ok"),
+                    Err(e) => log(format!("arrancar: error: {e}")),
+                }
                 let _ = r.send(result);
             }
             Cmd::Stop(r) => {
@@ -319,7 +320,14 @@ fn device_name(d: &Device) -> String {
 
 fn find_device(host: &cpal::Host, id: &str) -> Result<Device, String> {
     let parsed = id.parse().map_err(|e: cpal::Error| e.to_string())?;
-    host.device_by_id(&parsed).ok_or_else(|| "No se encuentra el dispositivo (¿desconectado?)".to_string())
+    if let Some(d) = host.device_by_id(&parsed) {
+        return Ok(d);
+    }
+    #[cfg(windows)]
+    if let Some((_, name)) = id.split_once(':').filter(|_| host.id().name().eq_ignore_ascii_case("ASIO")) {
+        return Err(asio_failure(name));
+    }
+    Err("No se encuentra el dispositivo (¿desconectado?)".to_string())
 }
 
 fn range(b: &SupportedBufferSize) -> Option<(u32, u32)> {
@@ -336,30 +344,56 @@ fn list_hosts() -> Vec<HostInfo> {
         .collect()
 }
 
+/// Los drivers ASIO instalados, solo por nombre. cpal carga cada driver para listarlos (también los
+/// de equipos desconectados, y ASIO4ALL tarda 10-20 s): aquí se lee la lista y se abre de verdad
+/// solo el elegido, al arrancar.
+#[cfg(windows)]
+fn asio_devices() -> Vec<DeviceInfo> {
+    asio_sys::Asio::new()
+        .driver_names()
+        .into_iter()
+        .map(|name| DeviceInfo {
+            id: cpal::DeviceId::new(cpal::HostId::Asio, &name).to_string(),
+            name,
+            inputs: 0,
+            outputs: 0,
+            sample_rate: None,
+            buffer_range: None,
+            is_default_input: false,
+            is_default_output: false,
+        })
+        .collect()
+}
+
+/// Por qué no se puede abrir un driver ASIO que está instalado.
+#[cfg(windows)]
+fn asio_failure(name: &str) -> String {
+    let reason = match asio_sys::Asio::new().load_driver(name) {
+        Ok(_) => return format!("El driver «{name}» ha respondido tarde. Pulsa Reintentar."),
+        Err(e) => format!("{e:?}"),
+    };
+    log(format!("el driver ASIO «{name}» no carga: {reason}"));
+    if reason.contains("NoDrivers") || reason.contains("HardwareMalfunction") {
+        format!("«{name}» no encuentra su equipo. Comprueba que la interfaz está conectada y libre (sin otro programa usándola), o elige otro driver.")
+    } else if reason.contains("DriverAlreadyExists") {
+        "Hay otro driver ASIO abierto en Riff Studio. Apaga el motor, vuelve a encenderlo y prueba de nuevo.".into()
+    } else {
+        format!("No se pudo abrir «{name}». Puede que otro programa esté usando la interfaz: ciérralo y pulsa Reintentar. ({reason})")
+    }
+}
+
 fn list_devices(host: &str) -> Result<Vec<DeviceInfo>, String> {
+    #[cfg(windows)]
+    if host.eq_ignore_ascii_case("ASIO") {
+        return Ok(asio_devices());
+    }
     let host = host_by_name(host)?;
     let default_in = host.default_input_device().and_then(|d| d.id().ok());
     let default_out = host.default_output_device().and_then(|d| d.id().ok());
-    let is_asio = host.id().name().eq_ignore_ascii_case("ASIO");
     let devices = host.devices().map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for d in devices {
         let Ok(id) = d.id() else { continue };
-        // Pedir la configuración de un driver ASIO lo carga (ASIO4ALL tarda 10-20 s):
-        // aquí solo se lista por nombre y se abre de verdad al arrancar.
-        if is_asio {
-            out.push(DeviceInfo {
-                id: id.to_string(),
-                name: device_name(&d),
-                inputs: 0,
-                outputs: 0,
-                sample_rate: None,
-                buffer_range: None,
-                is_default_input: false,
-                is_default_output: false,
-            });
-            continue;
-        }
         let inp = d.default_input_config();
         let outp = d.default_output_config();
         // Un driver que no deja leer su configuración (p. ej. ASIO4ALL ocupado) se lista

@@ -1,6 +1,8 @@
 # Genera el instalador de Windows y lo sube a una release de GitHub.
 # Uso: crea una etiqueta (git tag v0.1.0 && git push --tags) o lánzalo a mano desde la pestaña Actions.
 # La landing busca el .exe de «la última release» para el botón de descarga.
+# Las actualizaciones automáticas necesitan el secreto TAURI_SIGNING_PRIVATE_KEY (la clave privada
+# con la que se firman; su pareja pública está en src-tauri/tauri.conf.json).
 name: Release
 
 on:
@@ -31,9 +33,14 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Riff Studio ${{ github.ref_name }}
           releaseBody: Instalador para Windows 10 y 11 de 64 bits.
           releaseDraft: false
           prerelease: false
+          # Publica latest.json (lo que consulta la app) apuntando al instalador .exe
+          args: --config src-tauri/tauri.release.conf.json
+          updaterJsonPreferNsis: true

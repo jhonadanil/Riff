@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { midiNotesByTrack } from "./midiNotes";
+import { refreshChains, useChains } from "./chains";
 import * as Tone from "tone";
 import { encodeWav } from "./wav";
 import { useProject, type Clip, type LoopRegion } from "@/store/project";
@@ -100,7 +101,7 @@ export async function renderMixToWav(onProgress?: (p: number) => void) {
   const { tracks, clips, bpm, buses, master } = useProject.getState();
   const end = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
   if (end <= 0) throw new Error("El proyecto no tiene audio");
-  const duration = end + 1; // un segundo de cola
+  const duration = end + 2; // cola para reverbs y ecos
   const { trackAudible, busAudible } = audibility(tracks, buses);
 
   // Clips con ganancia o fundidos: se hornean aparte (suenan enteros desde 0)
@@ -112,6 +113,7 @@ export async function renderMixToWav(onProgress?: (p: number) => void) {
 
   onProgress?.(0);
   const instruments = await renderInstruments(clips, duration);
+  const effects = await renderEffects(tracks.map((t) => t.id), clips);
   const rendered = await Tone.Offline(({ transport: t }) => {
     t.bpm.value = bpm;
     const out = new Tone.Channel({ channelCount: 2, volume: dbOf(master) }).toDestination();
@@ -144,13 +146,14 @@ export async function renderMixToWav(onProgress?: (p: number) => void) {
     for (const c of clips) {
       const buffer = buffers.get(c.bufferId);
       const ch = chans.get(c.trackId);
-      if (!buffer || !ch) continue;
+      // El audio limpio de una pista con efectos ya va en su tira procesada
+      if (!buffer || !ch || (effects.has(c.trackId) && !c.fx)) continue;
       const bake = baked.get(c.id);
       if (bake) new Tone.Player(bake).connect(ch).sync().start(c.start, 0, c.duration);
       else new Tone.Player(buffer).connect(ch).sync().start(c.start, c.offset, c.duration);
     }
-    // Instrumentos ya renderizados por el motor nativo: entran por el canal de su pista
-    for (const [trackId, buffer] of instruments) {
+    // Instrumentos y efectos ya renderizados por el motor nativo: entran por el canal de su pista
+    for (const [trackId, buffer] of [...instruments, ...effects]) {
       const ch = chans.get(trackId);
       if (ch) new Tone.Player(buffer).connect(ch).start(0);
     }
@@ -183,6 +186,61 @@ async function renderInstruments(clips: Clip[], duration: number) {
       // Una pista MIDI sin instrumento cargado no suena: no debe impedir exportar el resto
       console.warn("[exportar] no se pudo renderizar el instrumento de la pista", trackId, err);
     }
+  }
+  return out;
+}
+
+// --- Pistas con efectos -------------------------------------------------------
+
+/** Si la pista lleva plugins de efectos (no un instrumento). */
+export function hasEffects(trackId: string) {
+  const chain = useChains.getState().byTrack[trackId];
+  return !!chain && chain.count > 0 && !chain.instrument;
+}
+
+/** Clips de audio de una pista que aún no llevan los efectos puestos. */
+export function dryClips(clips: Clip[], trackId: string) {
+  return clips.filter((c) => c.trackId === trackId && !c.midi && !c.fx && buffers.has(c.bufferId));
+}
+
+/** Junta clips en una sola tira desde el principio de la canción: f32 estéreo intercalado. */
+export async function renderDry(clips: Clip[], rate: number) {
+  const end = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(end * rate)), rate);
+  for (const c of clips) {
+    const buffer = buffers.get(c.bufferId)?.get();
+    if (!buffer) continue;
+    const baked = hasEnvelope(c);
+    const source = ctx.createBufferSource();
+    source.buffer = baked ? bakeClip(buffer, c) : buffer;
+    source.connect(ctx.destination);
+    source.start(c.start, baked ? 0 : c.offset, c.duration);
+  }
+  const audio = await ctx.startRendering();
+  const left = audio.getChannelData(0);
+  const right = audio.getChannelData(1);
+  const out = new Float32Array(audio.length * 2);
+  for (let i = 0; i < audio.length; i++) {
+    out[i * 2] = left[i];
+    out[i * 2 + 1] = right[i];
+  }
+  return out;
+}
+
+/** Pasa por sus plugins el audio de cada pista con efectos (para exportar). */
+async function renderEffects(trackIds: string[], clips: Clip[]) {
+  const out = new Map<string, AudioBuffer>();
+  if (!isTauri()) return out;
+  await refreshChains();
+  const ctx = Tone.getContext().rawContext as unknown as BaseAudioContext;
+  for (const trackId of trackIds) {
+    const dry = dryClips(clips, trackId);
+    if (!hasEffects(trackId) || !dry.length) continue;
+    // Si falla, falla la exportación: sacar la pista sin sus efectos no sería la mezcla
+    const rate = await invoke<number>("plugin_rate");
+    const input = await renderDry(dry, rate);
+    const bytes = await invoke<ArrayBuffer>("plugin_process", new Uint8Array(input.buffer), { headers: { "x-track": trackId } });
+    out.set(trackId, await ctx.decodeAudioData(bytes));
   }
   return out;
 }
@@ -336,8 +394,16 @@ setInterval(applyAutomation, 30);
 type PlayerEntry = { player: Tone.Player; key: string };
 const players = new Map<string, PlayerEntry>();
 
+/** Pistas cuyo audio limpio toca el motor nativo (por sus efectos): aquí se callan. */
+let nativeTracks = new Set<string>();
+
+export function setNativeTracks(ids: Set<string>) {
+  nativeTracks = ids;
+  syncClips(useProject.getState().clips);
+}
+
 /** Todo lo que, si cambia, obliga a reprogramar el clip. */
-const clipKey = (c: Clip) =>
+export const clipKey = (c: Clip) =>
   `${c.trackId}|${c.start}|${c.offset}|${c.duration}|${c.bufferId}|${c.gain ?? 1}|${c.fadeIn ?? 0}|${c.fadeOut ?? 0}`;
 
 /** Pico (0..1+) de la parte audible de un clip de audio; undefined si no hay audio. */
@@ -360,6 +426,14 @@ function syncClips(clips: Clip[]) {
     const buffer = buffers.get(c.bufferId);
     const channel = channels.get(c.trackId);
     if (!buffer || !channel) continue;
+    if (nativeTracks.has(c.trackId) && !c.fx) {
+      const old = players.get(c.id);
+      if (old) {
+        old.player.unsync().dispose();
+        players.delete(c.id);
+      }
+      continue;
+    }
 
     const key = clipKey(c);
     const entry = players.get(c.id);

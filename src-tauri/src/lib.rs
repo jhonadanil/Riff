@@ -1,10 +1,28 @@
 mod audio;
+mod logfile;
 mod midi;
 mod plugins;
+
+/// Muestra el archivo de registro en el explorador.
+#[tauri::command]
+fn open_logs() -> Result<(), String> {
+    let path = logfile::path().ok_or("No hay archivo de registro")?;
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Una sola copia abierta (dos se pelearían por el driver de audio): tiene que ir la primera
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -12,6 +30,10 @@ pub fn run() {
         .manage(midi::Midi::default())
         .setup(|app| {
             use tauri::Manager;
+            if let Ok(dir) = app.path().app_log_dir() {
+                logfile::init(&dir);
+            }
+            logfile::write(format!("Riff Studio {} arrancado", app.package_info().version));
             let chain = app.state::<audio::Engine>().chain();
             app.manage(plugins::PluginHost::new(chain));
             Ok(())
@@ -44,6 +66,10 @@ pub fn run() {
             plugins::midi_play,
             plugins::midi_stop,
             plugins::plugin_render,
+            plugins::plugin_rate,
+            plugins::plugin_process,
+            plugins::track_set_audio,
+            open_logs,
             plugins::plugin_set_inputs,
             plugins::plugin_set_armed,
             plugins::plugin_overview,

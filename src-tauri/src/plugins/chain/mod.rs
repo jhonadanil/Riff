@@ -76,8 +76,69 @@ struct Seq {
     last: f64,
     /// Ajuste de sincronía con el audio de las pistas (segundos).
     offset: f64,
-    /// Volumen y si se oye (mute/solo) de cada pista con instrumento.
-    mix: HashMap<String, (f32, bool)>,
+    /// Mezcla de cada pista que suena por el motor nativo.
+    mix: HashMap<String, TrackMix>,
+    /// Desde qué posición arrancó la canción (antes de ella no suena el audio de las pistas).
+    from: f64,
+    /// Por dónde va la lectura del audio de las pistas: avanza muestra a muestra para que las
+    /// irregularidades del reloj no produzcan chasquidos.
+    cursor: f64,
+}
+
+/// Volumen, si se oye (mute/solo) y panorama de una pista.
+pub type TrackMix = (f32, bool, f32);
+
+/// El audio grabado o importado de una pista, para que suene por sus plugins al reproducir.
+pub struct Stem {
+    /// Muestras estéreo intercaladas desde el principio de la canción.
+    pub data: Vec<f32>,
+    pub rate: f64,
+}
+
+/// Deriva máxima entre el cursor de lectura y el reloj antes de saltar (s).
+const RESYNC: f64 = 0.05;
+
+impl Stem {
+    /// Muestra (L, R) en el instante `t`, interpolada; silencio fuera del audio.
+    fn at(&self, t: f64) -> (f32, f32) {
+        if t < 0.0 {
+            return (0.0, 0.0);
+        }
+        let x = t * self.rate;
+        let i = x as usize;
+        let f = (x - i as f64) as f32;
+        let get = |j: usize| self.data.get(j).copied().unwrap_or(0.0);
+        let mix = |c: usize| get(i * 2 + c) + (get((i + 1) * 2 + c) - get(i * 2 + c)) * f;
+        (mix(0), mix(1))
+    }
+
+    /// Suma a `out` el tramo que empieza en `t0` (a `sr` muestras por segundo), sin nada anterior a `from`.
+    fn add(&self, out: &mut [Vec<f32>; 2], t0: f64, sr: f64, from: f64, gain: f32) {
+        let [left, right] = out;
+        for (i, (a, b)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+            let t = t0 + i as f64 / sr;
+            if t < from {
+                continue;
+            }
+            let (l, r) = self.at(t);
+            *a += l * gain;
+            *b += r * gain;
+        }
+    }
+}
+
+/// Volumen repartido entre izquierda y derecha según el panorama (-1..1).
+fn balance(gain: f32, pan: f32) -> [f32; 2] {
+    [gain * (1.0 - pan).clamp(0.0, 1.0), gain * (1.0 + pan).clamp(0.0, 1.0)]
+}
+
+/// Suma la señal de una pista a la mezcla.
+fn add_to(mix: &mut [Vec<f32>; 2], signal: &[Vec<f32>], gain: [f32; 2]) {
+    for ((out, ch), g) in mix.iter_mut().zip(signal).zip(gain) {
+        for (m, x) in out.iter_mut().zip(ch) {
+            *m += *x * g;
+        }
+    }
 }
 
 /// Notas -> eventos de encendido y apagado, ordenados por tiempo.
@@ -197,6 +258,8 @@ pub struct Chain {
     rec_names: Mutex<Vec<String>>,
     recording: AtomicBool,
     seq: Mutex<Seq>,
+    /// Audio de las pistas con efectos, por id de pista (suena por la cadena al reproducir).
+    stems: Mutex<HashMap<String, Arc<Stem>>>,
     playing: std::sync::atomic::AtomicBool,
     /// Plugins de cada pista, por id de pista.
     pub(super) tracks: Mutex<HashMap<String, Vec<Slot>>>,
@@ -235,12 +298,21 @@ impl Chain {
             sc.mix[c].resize(n, 0.0);
         }
 
+        // Audio de las pistas que tiene que sonar en este bloque: (posición, punto de partida)
+        let stems = self.stems.try_lock().ok();
+        let mut stem_at: Option<(f64, f64)> = None;
+
         // Secuenciador: mandar a los instrumentos las notas que caen en este bloque
         let mut seq = self.seq.try_lock().ok();
         let playing = seq.as_ref().is_some_and(|s| s.playing);
         if let Some(seq) = seq.as_mut().filter(|s| s.playing) {
             let now = base().elapsed().as_secs_f64();
             let pos = now - seq.origin + seq.offset;
+            if (seq.cursor - pos).abs() > RESYNC {
+                seq.cursor = pos;
+            }
+            stem_at = Some((seq.cursor, seq.from));
+            seq.cursor += n as f64 / sr;
             let w0 = seq.last.max(pos);
             let w1 = pos + n as f64 / sr;
             if w1 > w0 {
@@ -270,8 +342,18 @@ impl Chain {
             }
         }
 
+        let rec_names = self.rec_names.try_lock().ok();
+        let mix_of = |track: &str| seq.as_ref().and_then(|s| s.mix.get(track).copied()).unwrap_or((1.0, true, 0.0));
+        // El audio de la pista si le toca sonar: ni silenciada ni grabándose encima
+        let stem_of = |track: &str| {
+            let (t, from) = stem_at?;
+            let stem = stems.as_ref()?.get(track)?;
+            let recording = rec_names.as_ref().is_some_and(|r| r.iter().any(|x| x == track));
+            (!recording && mix_of(track).1).then_some((stem, t, from))
+        };
+
         // Una pista: pasa su señal (o silencio, si es un instrumento) por su cadena y la suma
-        let run = |track: &str, slots: &Vec<Slot>, gain: f32, bufs: &mut AudioBuffers, sc: &mut Scratch, rec: &mut RecGuard<'_>| {
+        let run = |track: &str, slots: &Vec<Slot>, gain: [f32; 2], bufs: &mut AudioBuffers, sc: &mut Scratch, rec: &mut RecGuard<'_>| {
             // Un instrumento arranca de silencio: lo que suena es lo que toca el MIDI
             let instrument = slots.first().is_some_and(|s| s.instrument);
             for c in 0..2 {
@@ -298,11 +380,7 @@ impl Chain {
                 }
             }
             capture(rec, track, &bufs.inputs[0], &bufs.inputs[1], sr, sc.latency, true);
-            for c in 0..2 {
-                for (m, x) in sc.mix[c].iter_mut().zip(&bufs.inputs[c]) {
-                    *m += *x * gain;
-                }
-            }
+            add_to(&mut sc.mix, &bufs.inputs, gain);
         };
 
         for track in monitored.iter() {
@@ -318,17 +396,15 @@ impl Chain {
             sc.dry[1].clear();
             sc.dry[1].extend_from_slice(&sc.raw[r]);
             capture(&mut rec, track, &sc.dry[0], &sc.dry[1], sr, sc.latency, false);
+            // Si además suena lo grabado en la pista, entra junto a la señal en vivo
+            if let Some((stem, t, from)) = stem_of(track) {
+                stem.add(&mut sc.dry, t, sr, from, mix_of(track).0);
+            }
             let slots = tracks.get(track).filter(|s| s.iter().any(|s| !s.bypass.load(Ordering::Relaxed)));
             match slots {
-                Some(slots) => run(track, slots, 1.0, bufs, sc, &mut rec),
-                None => {
-                    // Sin plugins: la señal directa
-                    for c in 0..2 {
-                        for (m, x) in sc.mix[c].iter_mut().zip(&sc.dry[c]) {
-                            *m += *x;
-                        }
-                    }
-                }
+                Some(slots) => run(track, slots, [1.0; 2], bufs, sc, &mut rec),
+                // Sin plugins: la señal directa
+                None => add_to(&mut sc.mix, &sc.dry, [1.0; 2]),
             }
         }
         // Instrumentos de pistas armadas: se tocan en vivo aunque no se monitoricen
@@ -338,11 +414,10 @@ impl Chain {
             }
             if let Some(slots) = tracks.get(track).filter(|s| s.first().is_some_and(|s| s.instrument && !s.bypass.load(Ordering::Relaxed))) {
                 sc.done.push(key(track));
-                run(track, slots, 1.0, bufs, sc, &mut rec);
+                run(track, slots, [1.0; 2], bufs, sc, &mut rec);
             }
         }
         // Pistas que graban "con efectos" sin escucharse: su cadena corre igual, sin sonar
-        let rec_names = self.rec_names.try_lock().ok();
         for track in rec_names.iter().flat_map(|g| g.iter()) {
             if sc.done.contains(&key(track)) {
                 continue;
@@ -360,21 +435,40 @@ impl Chain {
             capture(&mut rec, track, &sc.dry[0], &sc.dry[1], sr, sc.latency, false);
             let wet = rec.as_ref().and_then(|g| g.as_ref()).and_then(|r| r.tracks.get(track)).is_some_and(|t| t.wet);
             if let (true, Some(slots)) = (wet, tracks.get(track)) {
-                run(track, slots, 0.0, bufs, sc, &mut rec);
+                run(track, slots, [0.0; 2], bufs, sc, &mut rec);
             }
         }
         // Instrumentos con clips MIDI que suenan con la canción (si no se están ya escuchando)
-        if let (true, Some(seq)) = (playing, seq.as_ref()) {
-            for track in seq.events.keys() {
+        if let (true, Some(s)) = (playing, seq.as_ref()) {
+            for track in s.events.keys() {
                 if sc.done.contains(&key(track)) {
                     continue;
                 }
-                let (gain, audible) = seq.mix.get(track).copied().unwrap_or((1.0, true));
+                let (gain, audible, pan) = mix_of(track);
                 let Some(slots) = tracks.get(track).filter(|s| s.first().is_some_and(|s| s.instrument)) else { continue };
                 if audible {
                     sc.done.push(key(track));
-                    run(track, slots, gain, bufs, sc, &mut rec);
+                    run(track, slots, balance(gain, pan), bufs, sc, &mut rec);
                 }
+            }
+        }
+        // Audio de las pistas con efectos que no se están escuchando en vivo
+        for track in stems.iter().flat_map(|s| s.keys()) {
+            if sc.done.contains(&key(track)) {
+                continue;
+            }
+            let Some((stem, t, from)) = stem_of(track) else { continue };
+            let (gain, _, pan) = mix_of(track);
+            for ch in sc.dry.iter_mut() {
+                ch.clear();
+                ch.resize(n, 0.0);
+            }
+            stem.add(&mut sc.dry, t, sr, from, 1.0);
+            sc.done.push(key(track));
+            match tracks.get(track).filter(|s| s.first().is_some_and(|s| !s.instrument)) {
+                Some(slots) => run(track, slots, balance(gain, pan), bufs, sc, &mut rec),
+                // Se han quitado los plugins y la interfaz aún no ha retirado el audio: suena tal cual
+                None => add_to(&mut sc.mix, &sc.dry, balance(gain, pan)),
             }
         }
 
@@ -432,8 +526,21 @@ impl Chain {
         self.seq.lock().unwrap().events = events;
     }
 
-    pub fn set_mix(&self, mix: HashMap<String, (f32, bool)>) {
+    pub fn set_mix(&self, mix: HashMap<String, TrackMix>) {
         self.seq.lock().unwrap().mix = mix;
+    }
+
+    /// Pone (o con `None`, quita) el audio de una pista.
+    pub fn set_stem(&self, track: String, stem: Option<Stem>) {
+        let old = {
+            let mut stems = self.stems.lock().unwrap();
+            match stem {
+                Some(s) => stems.insert(track, Arc::new(s)),
+                None => stems.remove(&track),
+            }
+        };
+        // La memoria anterior se libera ya sin el cerrojo que usa el audio
+        drop(old);
     }
 
     pub fn set_offset(&self, seconds: f64) {
@@ -445,6 +552,8 @@ impl Chain {
         let mut s = self.seq.lock().unwrap();
         s.origin = base().elapsed().as_secs_f64() + delay - position;
         s.last = position;
+        s.from = position;
+        s.cursor = position - delay;
         s.playing = true;
         self.playing.store(true, Ordering::Relaxed);
         drop(s);
@@ -476,12 +585,12 @@ impl Chain {
             *r = Some(sample_rate);
         }
         let Ok(tracks) = self.tracks.try_lock() else {
-            eprintln!("[plugins] la cadena está ocupada: no se ajusta la frecuencia de muestreo");
+            crate::logfile::write("[plugins] la cadena está ocupada: no se ajusta la frecuencia de muestreo");
             return;
         };
         for s in tracks.values().flatten() {
             let Ok(mut p) = s.plugin.try_lock() else {
-                eprintln!("[plugins] un plugin está ocupado: no se ajusta la frecuencia de muestreo");
+                crate::logfile::write("[plugins] un plugin está ocupado: no se ajusta la frecuencia de muestreo");
                 continue;
             };
             if (p.sample_rate() - sample_rate).abs() > 0.5 {

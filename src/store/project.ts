@@ -69,6 +69,8 @@ export type Clip = {
   bufferId: string;
   /** Duración total del audio original, límite para el recorte. */
   sourceDuration: number;
+  /** El audio ya lleva puestos los efectos de la pista (grabado "con efectos"). */
+  fx?: boolean;
   /** Si es un clip MIDI: sus notas (y no tiene audio). */
   midi?: MidiNote[];
   /** Ganancia del clip (lineal, 1 = sin cambios). */

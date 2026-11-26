@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { BookmarkPlus, ClipboardPaste, Headphones, Music2, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
+import { BookmarkPlus, ChevronDown, ClipboardPaste, Headphones, Music2, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -191,45 +199,51 @@ export function TrackList() {
   );
 }
 
-/** «Añadir pista»: clic = pista vacía; clic derecho = plantillas con su entrada, MIDI y plugins ya configurados. */
+/** «Añadir pista» (vacía) y, en la flecha, las plantillas con su entrada, MIDI y plugins ya configurados. */
 function AddTrackMenu({ onEmpty }: { onEmpty: () => void }) {
   const presets = useTrackPresets((s) => s.list);
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <Button variant="ghost" size="sm" onClick={onEmpty} title="Clic derecho: plantillas">
-          <Plus />
-          Añadir pista
-        </Button>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-52">
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Añadir desde plantilla</div>
-        {presets.map((p) => (
-          <ContextMenuItem key={p.id} onSelect={() => void addTrackFromPreset(p)} className="group gap-2">
-            <span className="h-3 w-1 rounded-full" style={{ background: p.color }} />
-            <span className="flex-1">{p.name}</span>
-            {!p.builtin && (
-              <button
-                className="rounded p-0.5 opacity-0 hover:bg-foreground/10 group-hover:opacity-100"
-                title="Borrar plantilla"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  deleteTrackPreset(p.id);
-                }}
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </ContextMenuItem>
-        ))}
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onEmpty}>
-          <Plus />
-          Pista vacía
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <div className="flex items-center">
+      <Button variant="ghost" size="sm" className="rounded-r-none pr-2" onClick={onEmpty}>
+        <Plus />
+        Añadir pista
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="rounded-l-none border-l-border px-1.5" aria-label="Añadir desde plantilla" title="Añadir desde plantilla">
+            <ChevronDown />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-52">
+          <DropdownMenuLabel>Añadir desde plantilla</DropdownMenuLabel>
+          {presets.map((p) => (
+            <DropdownMenuItem key={p.id} onSelect={() => void addTrackFromPreset(p)} className="group gap-2">
+              <span className="h-3 w-1 rounded-full" style={{ background: p.color }} />
+              <span className="flex-1">{p.name}</span>
+              {!p.builtin && (
+                <button
+                  className="rounded p-0.5 opacity-0 group-focus:opacity-100 hover:bg-foreground/10 group-hover:opacity-100"
+                  aria-label={`Borrar la plantilla ${p.name}`}
+                  title="Borrar plantilla"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    deleteTrackPreset(p.id);
+                  }}
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onEmpty}>
+            <Plus />
+            Pista vacía
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 

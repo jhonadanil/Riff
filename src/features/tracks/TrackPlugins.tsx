@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTrackKind, useTrackPluginCount } from "@/audio/chains";
 import { useNative } from "@/audio/native";
+import { cn } from "@/lib/utils";
 import type { Track } from "@/store/project";
 import { PluginChain } from "./PluginChain";
 import { TrackMidiPort } from "./TrackMidi";
@@ -24,11 +25,21 @@ export function TrackPluginsButton({ track }: { track: Track }) {
         <TooltipTrigger asChild>
           <Button
             size="icon-xs"
-            variant={count > 0 ? "secondary" : "ghost"}
+            variant="ghost"
+            className={cn(
+              "relative",
+              count > 0 && "bg-primary/15 text-primary hover:bg-primary/25 hover:text-primary dark:hover:bg-primary/25",
+              open && "ring-2 ring-primary/60",
+            )}
             onClick={() => setOpen(true)}
-            aria-label={`Entrada y plugins de ${track.name}`}
+            aria-label={`Entrada y plugins de ${track.name}${count > 0 ? ` (${count} plugins)` : ""}`}
           >
             <Plug />
+            {count > 0 && (
+              <span className="absolute -top-1 -right-1 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums">
+                {count}
+              </span>
+            )}
           </Button>
         </TooltipTrigger>
         <TooltipContent>Entrada y plugins VST3 de la pista</TooltipContent>

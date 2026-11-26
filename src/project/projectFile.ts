@@ -16,7 +16,9 @@ import { addRecent, removeRecent } from "./recent";
 const FORMAT_VERSION = 1;
 const AUDIO_DIR = "Audio";
 
-type RiffFile = ProjectData & {
+export type RiffFile = ProjectData & {
+  /** Solo en la copia de recuperación: dónde estaba guardado el proyecto. */
+  originalPath?: string | null;
   format: "riff";
   version: number;
   /** bufferId -> nombre de archivo dentro de Audio/ */
@@ -85,39 +87,7 @@ export async function openProject(path?: string) {
 
   const id = toast.loading(`Abriendo «${projectName(chosen)}»…`);
   try {
-    const file = JSON.parse(await readTextFile(chosen)) as RiffFile;
-    if (file.format !== "riff") throw new Error("No es un proyecto de Riff Studio");
-    if (file.version > FORMAT_VERSION) throw new Error("El proyecto es de una versión más nueva de Riff Studio");
-
-    const audioDir = await join(await dirname(chosen), AUDIO_DIR);
-    const missing: string[] = [];
-    for (const [bufferId, fileName] of Object.entries(file.audio)) {
-      if (engine.hasBuffer(bufferId)) continue;
-      const audioPath = await join(audioDir, fileName);
-      try {
-        const bytes = await readFile(audioPath);
-        await engine.loadBuffer(bufferId, bytes, fileName.split(".").pop() ?? "wav");
-      } catch {
-        missing.push(fileName);
-      }
-    }
-
-    const clips = file.clips.filter((c) => c.midi || engine.hasBuffer(c.bufferId));
-    stopPlayback();
-    useProject.getState().loadProject(
-      {
-        bpm: file.bpm,
-        timeSig: file.timeSig ?? [4, 4],
-        tracks: file.tracks,
-        clips,
-        buses: file.buses ?? [],
-        master: file.master ?? 1,
-        loop: file.loop,
-        loopEnabled: file.loopEnabled,
-      },
-      chosen,
-    );
-    await restorePlugins(file.plugins ?? {});
+    const { missing, audioDir } = await readProject(chosen, () => chosen);
     addRecent(chosen);
     if (missing.length) {
       toast.warning(`Faltan ${missing.length} audio(s)`, {
@@ -132,6 +102,52 @@ export async function openProject(path?: string) {
     if (path) removeRecent(path);
     toast.error("No se pudo abrir el proyecto", { id, description: errorText(err) });
   }
+}
+
+/** Lee un archivo de proyecto, carga sus audios y plugins y lo pone en pantalla. */
+async function readProject(path: string, savedAs: (file: RiffFile) => string | null) {
+  const file = JSON.parse(await readTextFile(path)) as RiffFile;
+  if (file.format !== "riff") throw new Error("No es un proyecto de Riff Studio");
+  if (file.version > FORMAT_VERSION) throw new Error("El proyecto es de una versión más nueva de Riff Studio");
+
+  const audioDir = await join(await dirname(path), AUDIO_DIR);
+  const missing: string[] = [];
+  for (const [bufferId, fileName] of Object.entries(file.audio)) {
+    if (engine.hasBuffer(bufferId)) continue;
+    const audioPath = await join(audioDir, fileName);
+    try {
+      const bytes = await readFile(audioPath);
+      await engine.loadBuffer(bufferId, bytes, fileName.split(".").pop() ?? "wav");
+    } catch {
+      missing.push(fileName);
+    }
+  }
+
+  const clips = file.clips.filter((c) => c.midi || engine.hasBuffer(c.bufferId));
+  const projectPath = savedAs(file);
+  stopPlayback();
+  useProject.getState().loadProject(
+    {
+      bpm: file.bpm,
+      timeSig: file.timeSig ?? [4, 4],
+      tracks: file.tracks,
+      clips,
+      buses: file.buses ?? [],
+      master: file.master ?? 1,
+      loop: file.loop,
+      loopEnabled: file.loopEnabled,
+    },
+    projectPath,
+  );
+  await restorePlugins(file.plugins ?? {});
+  return { missing, audioDir, projectPath };
+}
+
+/** Carga la copia de recuperación. Devuelve la ruta que tenía el proyecto. */
+export async function loadProjectFrom(path: string, savedAs: (file: RiffFile) => string | null) {
+  const { missing, projectPath } = await readProject(path, savedAs);
+  if (missing.length) toast.warning(`Faltan ${missing.length} audio(s)`);
+  return projectPath;
 }
 
 /** Guarda en la ruta actual (o pregunta dónde si es nuevo). Devuelve true si se guardó. */
@@ -150,37 +166,46 @@ export async function saveProjectAs(): Promise<boolean> {
   return writeProject(path.toLowerCase().endsWith(".riff") ? path : `${path}.riff`);
 }
 
-async function writeProject(path: string, quiet = false): Promise<boolean> {
+/**
+ * Escribe en `dir/Audio` los audios del proyecto actual y devuelve el contenido de su archivo.
+ * No toca los plugins cargados (ver `snapshotPlugins` al guardar).
+ */
+export async function buildProjectFile(dir: string, plugins = () => invoke<Record<string, unknown[]>>("plugin_snapshot")) {
   const s = useProject.getState();
+  const audioDir = await join(dir, AUDIO_DIR);
+  await mkdir(audioDir, { recursive: true });
+
+  const audio: Record<string, string> = {};
+  for (const bufferId of new Set(s.clips.map((c) => c.bufferId))) {
+    const src = engine.getSource(bufferId);
+    if (!src) continue;
+    const fileName = `${bufferId}.${src.ext}`;
+    const filePath = await join(audioDir, fileName);
+    // Los audios no cambian nunca: si ya están en disco no hace falta reescribirlos
+    if (!(await exists(filePath))) await writeFile(filePath, src.bytes);
+    audio[bufferId] = fileName;
+  }
+
+  const file: RiffFile = {
+    format: "riff",
+    version: FORMAT_VERSION,
+    bpm: s.bpm,
+    timeSig: s.timeSig,
+    tracks: s.tracks,
+    clips: s.clips,
+    buses: s.buses,
+    master: s.master,
+    loop: s.loop,
+    loopEnabled: s.loopEnabled,
+    audio,
+    plugins: await plugins(),
+  };
+  return file;
+}
+
+async function writeProject(path: string, quiet = false): Promise<boolean> {
   try {
-    const audioDir = await join(await dirname(path), AUDIO_DIR);
-    await mkdir(audioDir, { recursive: true });
-
-    const audio: Record<string, string> = {};
-    for (const bufferId of new Set(s.clips.map((c) => c.bufferId))) {
-      const src = engine.getSource(bufferId);
-      if (!src) continue;
-      const fileName = `${bufferId}.${src.ext}`;
-      const filePath = await join(audioDir, fileName);
-      // Los audios no cambian nunca: si ya están en disco no hace falta reescribirlos
-      if (!(await exists(filePath))) await writeFile(filePath, src.bytes);
-      audio[bufferId] = fileName;
-    }
-
-    const file: RiffFile = {
-      format: "riff",
-      version: FORMAT_VERSION,
-      bpm: s.bpm,
-      timeSig: s.timeSig,
-      tracks: s.tracks,
-      clips: s.clips,
-      buses: s.buses,
-      master: s.master,
-      loop: s.loop,
-      loopEnabled: s.loopEnabled,
-      audio,
-      plugins: await snapshotPlugins(),
-    };
+    const file = await buildProjectFile(await dirname(path), snapshotPlugins);
     await writeTextFile(path, JSON.stringify(file, null, 2));
     useProject.getState().markSaved(path);
     addRecent(path);

@@ -331,7 +331,7 @@ export async function stopRecording() {
   if (wet.length) {
     const s = useProject.getState();
     checkpointOnce();
-    for (const { trackId, buffer } of wet) {
+    for (const { trackId, buffer, fx } of wet) {
       if (!s.tracks.some((t) => t.id === trackId)) continue;
       s.addClip({
         id: crypto.randomUUID(),
@@ -342,6 +342,7 @@ export async function stopRecording() {
         duration: buffer.duration,
         sourceDuration: buffer.duration,
         bufferId: engine.addRecordedBuffer(buffer),
+        fx: fx || undefined,
       });
     }
   }

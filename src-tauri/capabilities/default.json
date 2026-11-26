@@ -9,6 +9,12 @@
     "core:window:allow-set-theme",
     "core:window:allow-destroy",
     "opener:default",
+    "updater:default",
+    "process:allow-restart",
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$APPDATA/recovery" }, { "path": "$APPDATA/recovery/**" }]
+    },
     "dialog:default",
     "fs:default",
     {

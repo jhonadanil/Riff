@@ -3,8 +3,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { useProject } from "@/store/project";
 import { confirmDiscard, projectName, startAutosave } from "@/project/projectFile";
+import { clearRecovery, startRecovery } from "@/project/recovery";
+import { checkForUpdates } from "./updates";
 
-/** Título de la ventana, aviso al cerrar con cambios sin guardar y autoguardado. */
+/** Título de la ventana, aviso al cerrar con cambios sin guardar, autoguardado y actualizaciones. */
 export function useAppWindow() {
   const projectPath = useProject((s) => s.projectPath);
   const dirty = useProject((s) => s.dirty);
@@ -18,7 +20,8 @@ export function useAppWindow() {
   useEffect(() => {
     if (!isTauri()) return;
     const unlisten = getCurrentWindow().onCloseRequested(async (e) => {
-      if (!(await confirmDiscard())) e.preventDefault();
+      if (await confirmDiscard()) await clearRecovery();
+      else e.preventDefault();
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -26,4 +29,11 @@ export function useAppWindow() {
   }, []);
 
   useEffect(() => startAutosave(), []);
+
+  useEffect(() => {
+    startRecovery();
+    // Un poco después de arrancar, para no competir con la carga del audio
+    const id = setTimeout(() => void checkForUpdates(), 5000);
+    return () => clearTimeout(id);
+  }, []);
 }

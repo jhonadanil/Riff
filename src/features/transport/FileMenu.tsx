@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/menubar";
 import { exportWav, newProject, openProject, saveProject, saveProjectAs } from "@/project/projectFile";
 import { clearRecent, useRecentProjects } from "@/project/recent";
+import { HelpMenu } from "./HelpMenu";
 
 export function FileMenu({ onImportAudio }: { onImportAudio: () => void }) {
   const recent = useRecentProjects();
@@ -66,6 +67,7 @@ export function FileMenu({ onImportAudio }: { onImportAudio: () => void }) {
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
+      <HelpMenu />
     </Menubar>
   );
 }

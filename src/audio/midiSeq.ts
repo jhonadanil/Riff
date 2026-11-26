@@ -23,19 +23,20 @@ if (isTauri()) {
   };
 
   /**
-   * Volumen y si se oye (mute/solo) de cada pista. Los instrumentos no pasan por el mezclador
-   * de Web Audio, así que aquí se aplican también la automatización de volumen, el bus y el master.
+   * Volumen, si se oye (mute/solo) y panorama de cada pista. Lo que suena por el motor nativo
+   * (instrumentos y pistas con efectos) no pasa por el mezclador de Web Audio, así que aquí se
+   * aplican también la automatización, el volumen del bus y el del master.
    */
   const syncMix = () => {
     const { tracks, buses, master, isPlaying } = useProject.getState();
     const { trackAudible } = audibility(tracks, buses);
     const pos = engine.position();
-    const mix: Record<string, [number, boolean]> = {};
+    const mix: Record<string, [number, boolean, number]> = {};
     for (const t of tracks) {
-      const auto = isPlaying ? trackAutomation(t)?.volume : undefined;
+      const auto = isPlaying ? trackAutomation(t) : null;
       const bus = buses.find((b) => b.id === t.out);
-      const volume = autoValue(auto, pos, t.volume) * master * (bus ? bus.volume : 1);
-      mix[t.id] = [volume, trackAudible.get(t.id) ?? true];
+      const volume = autoValue(auto?.volume, pos, t.volume) * master * (bus ? bus.volume : 1);
+      mix[t.id] = [volume, trackAudible.get(t.id) ?? true, autoValue(auto?.pan, pos, t.pan)];
     }
     call("midi_set_mix", { mix });
   };
@@ -43,7 +44,7 @@ if (isTauri()) {
   // Mientras suena, seguir las envolventes
   setInterval(() => {
     const s = useProject.getState();
-    if (s.isPlaying && s.tracks.some((t) => trackAutomation(t)?.volume)) syncMix();
+    if (s.isPlaying && s.tracks.some((t) => trackAutomation(t))) syncMix();
   }, 60);
 
   /** De qué dispositivo MIDI toma las notas cada pista ("" = cualquiera). */

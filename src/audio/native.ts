@@ -136,7 +136,9 @@ export async function refreshNativeDevices(auto = true) {
     const outputDevices = outHost === host ? devices : await invoke<NativeDevice[]>("audio_devices", { host: outHost });
     const pick = (list: NativeDevice[], id: string | null, ok: (d: NativeDevice) => boolean, isDefault: (d: NativeDevice) => boolean) =>
       id && list.some((d) => d.id === id && ok(d)) ? id : (list.find((d) => ok(d) && isDefault(d)) ?? list.find(ok))?.id ?? null;
-    const inputId = pick(devices, cur.inputId, (d) => host === "ASIO" || d.inputs > 0, (d) => d.isDefaultInput);
+    // Los drivers ASIO se listan por nombre, estén o no sus equipos conectados: con varios no se adivina
+    const choose = host === "ASIO" && devices.length > 1 && !devices.some((d) => d.id === cur.inputId);
+    const inputId = choose ? null : pick(devices, cur.inputId, (d) => host === "ASIO" || d.inputs > 0, (d) => d.isDefaultInput);
     // Con ASIO en los dos lados, entrada y salida son el mismo driver (solo se puede abrir uno)
     const outputId =
       host === "ASIO" && outHost === "ASIO" && inputId

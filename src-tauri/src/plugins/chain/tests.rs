@@ -9,6 +9,13 @@ const VST: &str = r"C:\Program Files\Common Files\VST3";
 const RATE: f64 = 48_000.0;
 const N: usize = 256;
 
+/// Los plugins de terceros no aguantan cargarse y usarse desde varios hilos a la vez (la app los
+/// carga todos en uno): las pruebas que usan uno se turnan. Tomarlo antes de cargar.
+fn turn() -> std::sync::MutexGuard<'static, ()> {
+    static ONE: Mutex<()> = Mutex::new(());
+    ONE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn load(name: &str) -> Option<Arc<Mutex<Plugin>>> {
     let path = format!("{VST}/{name}");
     if !std::path::Path::new(&path).exists() {
@@ -82,6 +89,7 @@ fn sin_pistas_monitorizadas_no_sale_nada() {
 
 #[test]
 fn efecto_en_la_pista_procesa_la_entrada() {
+    let _turn = turn();
     let Some(fx) = load("Tonocracy.vst3") else { return };
     let chain = Chain::default();
     chain.tracks.lock().unwrap().insert("gtr".into(), vec![slot(1, fx, false)]);
@@ -103,6 +111,7 @@ fn dos_pistas_cada_una_con_su_entrada() {
 
 #[test]
 fn instrumento_toca_con_midi_en_vivo() {
+    let _turn = turn();
     let Some(drum) = load("MODO DRUM.vst3") else { return };
     let chain = Chain::default();
     chain.tracks.lock().unwrap().insert("bat".into(), vec![slot(1, drum, true)]);
@@ -130,6 +139,7 @@ fn instrumento_toca_con_midi_en_vivo() {
 
 #[test]
 fn instrumento_toca_clips_midi_al_reproducir() {
+    let _turn = turn();
     let Some(drum) = load("MODO DRUM.vst3") else { return };
     let chain = Chain::default();
     chain.tracks.lock().unwrap().insert("bat".into(), vec![slot(1, drum, true)]);
@@ -153,6 +163,7 @@ fn instrumento_toca_clips_midi_al_reproducir() {
 
 #[test]
 fn instrumento_armado_suena_sin_monitorizar() {
+    let _turn = turn();
     let Some(drum) = load("MODO DRUM.vst3") else { return };
     let chain = Chain::default();
     chain.tracks.lock().unwrap().insert("bat".into(), vec![slot(1, drum, true)]);
@@ -186,6 +197,7 @@ fn guitarra_armada_sin_monitor_no_suena() {
 
 #[test]
 fn grabacion_nativa_limpia_y_con_efectos() {
+    let _turn = turn();
     let Some(fx) = load("Tonocracy.vst3") else { return };
     let chain = Chain::default();
     chain.tracks.lock().unwrap().insert("wet".into(), vec![slot(1, fx, false)]);
@@ -216,4 +228,52 @@ fn pista_sin_efectos_que_pide_efectos_se_graba_limpia() {
     let modes = chain.start_audio_rec(&[("a".into(), true)]);
     assert_eq!(modes, vec![("a".to_string(), false)]);
     chain.stop_audio_rec();
+}
+
+/// Dos segundos de nivel constante (L = 0.5, R = 0.25).
+fn stem() -> Stem {
+    Stem { data: [0.5f32, 0.25].repeat(RATE as usize * 2), rate: RATE }
+}
+
+#[test]
+fn el_audio_de_una_pista_suena_al_reproducir_con_su_mezcla() {
+    let chain = Chain::default();
+    chain.set_stem("gtr".into(), Some(stem()));
+    let (l, r) = run(&chain, 5);
+    assert!(l < 1e-6 && r < 1e-6, "parada no debe sonar: {l} {r}");
+
+    chain.set_mix([("gtr".to_string(), (0.5f32, true, 0.0f32))].into());
+    chain.play(0.0, 0.0);
+    let (l, r) = run(&chain, 20);
+    assert!((l - 0.25).abs() < 0.01 && (r - 0.125).abs() < 0.01, "volumen: {l} {r}");
+
+    // Panorama a la derecha y silenciada
+    chain.set_mix([("gtr".to_string(), (1.0f32, true, 1.0f32))].into());
+    let (l, r) = run(&chain, 5);
+    assert!(l < 1e-6 && r > 0.2, "panorama: {l} {r}");
+    chain.set_mix([("gtr".to_string(), (1.0f32, false, 0.0f32))].into());
+    let (l, r) = run(&chain, 5);
+    assert!(l < 1e-6 && r < 1e-6, "silenciada: {l} {r}");
+}
+
+#[test]
+fn al_grabar_sobre_una_pista_no_suena_su_audio() {
+    let chain = Chain::default();
+    chain.set_stem("gtr".into(), Some(stem()));
+    chain.start_audio_rec(&[("gtr".into(), false)]);
+    chain.play(0.0, 0.0);
+    // La entrada 1 lleva el seno, pero nada se monitoriza: no debe salir nada
+    let (l, r) = run(&chain, 10);
+    chain.stop_audio_rec();
+    assert!(l < 1e-6 && r < 1e-6, "{l} {r}");
+}
+
+#[test]
+fn el_audio_no_suena_antes_del_punto_de_partida() {
+    let chain = Chain::default();
+    chain.set_stem("gtr".into(), Some(stem()));
+    // Arranca dentro de 10 s: durante la espera, silencio
+    chain.play(0.5, 10.0);
+    let (l, r) = run(&chain, 5);
+    assert!(l < 1e-6 && r < 1e-6, "{l} {r}");
 }

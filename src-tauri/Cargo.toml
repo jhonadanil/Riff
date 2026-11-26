@@ -24,6 +24,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 rtrb = "0.4.1"
 # Alojar plugins VST3 (inserts de la señal de entrada: amplis, pedales…)
 vst3-host = { version = "0.11.1", default-features = false }
@@ -34,18 +37,21 @@ midir = "0.11"
 # el ASIO SDK lo descarga cpal solo, o se indica con CPAL_ASIO_DIR.
 [target.'cfg(windows)'.dependencies]
 cpal = { version = "0.18.2", features = ["asio"] }
+# La misma que usa cpal: para listar los drivers ASIO sin cargarlos
+asio-sys = "0.4"
 # Bombear los mensajes de las ventanas de los plugins (la librería de VST3 no lo hace en Windows)
 windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_Foundation"] }
 
 [target.'cfg(not(windows))'.dependencies]
 cpal = "0.18.2"
 
-# cpal 0.18.2 (ASIO) suma timestamps que pueden desbordar; en debug eso hace
-# panic dentro del callback de ASIO y mata el proceso. En release simplemente
-# da la vuelta, así que se desactivan los overflow-checks solo para cpal.
+# Copia local con arreglos (p. ej. ventanas de plugins que no dan su tamaño hasta abrirse)
 [patch.crates-io]
 vst3-host = { path = "vendor/vst3-host" }
 
+# cpal 0.18.2 (ASIO) suma timestamps que pueden desbordar; en debug eso hace
+# panic dentro del callback de ASIO y mata el proceso. En release simplemente
+# da la vuelta, así que se desactivan los overflow-checks solo para cpal.
 [profile.dev.package.cpal]
 overflow-checks = false
 
