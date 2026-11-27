@@ -268,6 +268,11 @@ h2 { font-size: clamp(2rem, 4.6vw, 3.4rem); }
 .soon-list span { color: var(--muted-foreground); font-size: 0.98rem; max-width: 16em; }
 .soon-more { margin-top: 28px; color: var(--muted-foreground); font-size: 0.95rem; }
 
+.rig { padding-top: clamp(96px, 13vw, 170px); }
+.rig-lead { margin: 18px 0 32px; color: var(--muted-foreground); font-size: 1.2rem; max-width: 36em; }
+.rig img { display: block; width: 100%; max-width: 900px; height: auto; margin-bottom: 36px; border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow-overlay); }
+.rig .cta-note { margin-top: 18px; }
+.beta { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 4px 12px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 0.9rem; font-weight: 600; letter-spacing: 0; }
 .get { padding-top: clamp(96px, 13vw, 170px); padding-bottom: clamp(72px, 10vw, 120px); }
 .get-lead { margin: 18px 0 36px; color: var(--muted-foreground); font-size: 1.2rem; max-width: 30em; }
 .get .cta-note { margin-top: 18px; }
